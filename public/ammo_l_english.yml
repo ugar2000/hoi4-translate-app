@@ -16,17 +16,14 @@
  ammonition_need_thousands: "[?daily_ammo_need|H1]§HK§!"
  potential_need_hundreds: "[?potential_need_h|H0]"
  potential_need_thousands: "[?potential_consumption_max|H1]§HK§!"
-
  ammunition_effects: "Lack of Ammunition"
  daily_ammunition_gain: "Daily Ammunition Gain"
  ammunition_factor: "Ammunition Gain Factor"
  ammunition_capacity_k: "Ammunition Capacity (K)"
-
  ammunition_plant: "Ammunition Plant"
  ammunition_plant_desc: "A Factory only dedicated to producing ammunition."
  ammunition_silo: "Ammunition Storage"
  ammunition_silo_desc: "A place to savely store ammunition in high quantities."
- 
  ammunition_category: "Purchase Ammunition"
  ammunition_category_desc: "Purchase black market ammunition."
  buy_ammo_1000: "Buy 1,000 Rounds"
