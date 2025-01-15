@@ -4,13 +4,15 @@ import UploadedFileRedactor from "@/components/UploadedFileRedactor";
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col bg-none bg-amber-50 items-center p-24">
+    <main className="container mx-auto px-4 py-8">
+      <div className="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg p-6">
         <FileContextProvider>
             <FileSelector />
             <div className="w-full flex flex-row justify-between">
                 <UploadedFileRedactor />
             </div>
         </FileContextProvider>
+      </div>
     </main>
   );
 }
