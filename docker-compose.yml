@@ -16,6 +16,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DEEPL_API_KEY=${DEEPL_API_KEY}
+    ports:
+      - "3002:3002"
     depends_on:
       - redis
 
@@ -27,9 +29,23 @@ services:
       - "3001:3001"
     environment:
       - REDIS_URL=redis://redis:6379
+      - TRANSLATION_SERVICE_URL=http://translation-service:3002
+      - VARIABLE_SEPARATOR_URL=http://variable-separator:3003
     depends_on:
       - redis
       - translation-service
+      - variable-separator
+
+  variable-separator:
+    build:
+      context: ./services/variable-separator
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
 
 volumes:
   redis-data:

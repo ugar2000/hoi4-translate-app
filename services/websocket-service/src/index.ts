@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import Queue from 'bull';
 import Redis from 'ioredis';
+import axios from 'axios';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -32,8 +33,17 @@ interface TranslationJob {
   rowId: string;
 }
 
+interface SeparatorResponse {
+  processedText: string;
+  variables: Array<{ hash: string; value: string; }>;
+}
+
 const HEARTBEAT_INTERVAL = 30000;
 const CLIENT_TIMEOUT = 35000;
+
+const TRANSLATION_SERVICE_URL = process.env.TRANSLATION_SERVICE_URL || 'http://localhost:3002';
+const VARIABLE_SEPARATOR_URL = process.env.VARIABLE_SEPARATOR_URL || 'http://localhost:3003';
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 const wss = new WebSocket.Server({ 
   port: 3001,
@@ -71,6 +81,71 @@ setInterval(() => {
     }
   });
 }, HEARTBEAT_INTERVAL);
+
+function containsOnlyHashedVariables(text: string, variables: Array<{ hash: string; value: string; }>): boolean {
+  let onlyVarsText = text.trim();
+
+  variables.forEach(({ hash }) => {
+    onlyVarsText = onlyVarsText.replace(new RegExp(`{${hash}}`, 'g'), '');
+  });
+  
+  onlyVarsText = onlyVarsText.replace(/\s+/g, '');
+  
+  return onlyVarsText.length === 0;
+}
+
+const handleTranslation = async (ws: WebSocket, message: TranslationRequest) => {
+  try {
+    const separatorResponse = await axios.post<SeparatorResponse>(`${VARIABLE_SEPARATOR_URL}/separate`, {
+      text: message.text
+    });
+
+    const { processedText, variables } = separatorResponse.data;
+    console.log('Separated text:', processedText);
+    console.log('Variables:', variables);
+
+    if (containsOnlyHashedVariables(processedText, variables)) {
+      console.log('Text contains only variables, skipping translation');
+      ws.send(JSON.stringify({
+        type: 'translation',
+        rowId: message.rowId,
+        translatedText: message.text
+      }));
+      return;
+    }
+
+    const translationResponse = await axios.post(`${TRANSLATION_SERVICE_URL}/translate`, {
+      text: processedText,
+      targetLanguage: message.targetLanguage
+    });
+
+    const translatedText = translationResponse.data.translatedText;
+    console.log('Translated text:', translatedText);
+
+    const restoredResponse = await axios.post(`${VARIABLE_SEPARATOR_URL}/restore`, {
+      text: translatedText,
+      variables
+    });
+
+    const finalText = restoredResponse.data.text;
+    console.log('Restored text:', finalText);
+
+    ws.send(JSON.stringify({
+      type: 'translation',
+      rowId: message.rowId,
+      translatedText: finalText
+    }));
+
+  } catch (error) {
+    console.error('Translation error:', error);
+    ws.send(JSON.stringify({
+      type: 'status',
+      rowId: message.rowId,
+      status: 'error',
+      error: 'Translation failed'
+    }));
+  }
+};
 
 wss.on('connection', (ws: WebSocket) => {
   console.log('Client connected. Total clients:', wss.clients.size);
@@ -151,6 +226,14 @@ wss.on('connection', (ws: WebSocket) => {
           activeJobs.delete(data.rowId);
         });
       }
+
+      ws.send(JSON.stringify({
+        type: 'status',
+        rowId: data.rowId,
+        status: 'processing'
+      }));
+
+      await handleTranslation(ws, data);
     } catch (error) {
       console.error('Message processing error:', error);
     }

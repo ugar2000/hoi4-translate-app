@@ -15,7 +15,7 @@ import { FileInput } from "@/components/ui/file-input";
 import { en } from "@/locales/en";
 
 const FileAndLanguageSelector = () => {
-    const {setFile, file, setOriginLang, addRow, setRows, setTargetLang} = useContext(FileContext)
+    const {setFile, file, setOriginLang, setRows, setTargetLang} = useContext(FileContext)
     const [selectedLanguage, setSelectedLanguage] = useState<LANGUAGE_CODES | ''>('');
 
     useEffect(() => {
@@ -30,6 +30,9 @@ const FileAndLanguageSelector = () => {
                     setOriginLang(selectedLanguage);
                     const rows: LineItem[] = []
                     for (const line of lines) {
+
+                        if (!line.trim() || line.trim().startsWith('#') || line.trim().slice(-1) === ':') continue;
+                        
                         const [code, text] = line.split(/:(.*)/s);
                         if (!code || !text) continue;
                         rows.push({code: code.trim(), text, translatedText: ''});
@@ -56,14 +59,16 @@ const FileAndLanguageSelector = () => {
         setOriginLang('' as LANGUAGE_CODES);
     }, [setFile, setRows, setOriginLang]);
 
+    const handleLanguageChange = useCallback((value: LANGUAGE_CODES) => {
+        setSelectedLanguage(value);
+        setTargetLang(value);
+    }, [setTargetLang]);
+
     return (
         <div className="flex flex-col gap-4">
             <Select
                 value={selectedLanguage}
-                onValueChange={(value) => {
-                    setSelectedLanguage(value as LANGUAGE_CODES);
-                    setTargetLang(value as LANGUAGE_CODES);
-                }}
+                onValueChange={handleLanguageChange}
                 disabled={!file}
             >
                 <SelectTrigger>
