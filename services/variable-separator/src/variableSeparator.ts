@@ -10,7 +10,6 @@ const SPECIAL_CODES = [
   "§9", "§t"
 ];
 
-// Sort by length in descending order to handle longer codes first
 const SORTED_SPECIAL_CODES = SPECIAL_CODES.sort((a, b) => b.length - a.length);
 
 export class VariableSeparator {
@@ -22,7 +21,6 @@ export class VariableSeparator {
     const variables: Variable[] = [];
     let processedText = text;
 
-    // First handle special formatting codes
     SORTED_SPECIAL_CODES.forEach(code => {
       const regex = new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
       if (regex.test(processedText)) {
@@ -32,7 +30,6 @@ export class VariableSeparator {
       }
     });
 
-    // Then handle Paradox variables
     let match;
     while ((match = VARIABLE_PATTERN.exec(text)) !== null) {
       const fullMatch = match[0];

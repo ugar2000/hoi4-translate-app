@@ -31,10 +31,12 @@ services:
       - REDIS_URL=redis://redis:6379
       - TRANSLATION_SERVICE_URL=http://translation-service:3002
       - VARIABLE_SEPARATOR_URL=http://variable-separator:3003
+      - DEEPL_SERVICE_URL=http://deepl-service:3004
     depends_on:
       - redis
       - translation-service
       - variable-separator
+      - deepl-service
 
   variable-separator:
     build:
@@ -44,6 +46,17 @@ services:
       - "3003:3003"
     environment:
       - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+
+  deepl-service:
+    build:
+      context: ./services/deepl-service
+      dockerfile: Dockerfile
+    ports:
+      - "3004:3004"
+    environment:
+      - DEEPL_API_KEY=${DEEPL_API_KEY}
     depends_on:
       - redis
 

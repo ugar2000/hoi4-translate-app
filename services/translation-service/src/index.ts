@@ -26,19 +26,30 @@ interface TranslationResult {
   translatedText: string;
 }
 
+interface TranslationRequest {
+  text: string;
+  targetLanguage: string;
+  mode?: 'translate' | 'post-process';
+  context?: string;
+}
+
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const redis = new Redis(REDIS_URL);
 const translationQueue = new Queue<TranslationJob>('translation', REDIS_URL);
 
-async function translateText(text: string, sourceLanguage: string, targetLanguage: string): Promise<string> {
-  const systemPrompt = `You are a professional translator for Paradox games.
-Follow these rules strictly:
-1. Translate text naturally while preserving all formatting
-2. Do not modify any placeholders in curly braces like {abc123}
-3. Maintain game-specific terminology
-4. Translate from ${sourceLanguage} to ${targetLanguage}
-5. Keep the meaning and tone consistent with the game's style
-6. Only respond with the translated text, nothing else`;
+async function translateText(text: string, sourceLanguage: string, targetLanguage: string, mode: 'translate' | 'post-process' = 'translate', context: string = ''): Promise<string> {
+  const systemPrompt = mode === 'post-process' 
+    ? `You are a professional game translator and editor. Review and improve this ${targetLanguage} translation:
+       1. Ensure gaming terminology is consistent
+       2. Maintain the tone and style appropriate for games
+       3. Preserve all special characters and formatting
+       4. Only respond with the improved translation, nothing else
+       ${context}`
+    : `You are a professional translator specializing in game content. Translate this text to ${targetLanguage}:
+       1. Maintain natural language flow
+       2. Keep gaming terminology consistent
+       3. Preserve all special characters and formatting
+       4. Only respond with the translation, nothing else`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4",
@@ -87,34 +98,17 @@ translationQueue.process(async (job) => {
 
 app.post('/translate', async (req: Request, res: Response) => {
   try {
-    const { text, targetLanguage } = req.body;
+    const { text, targetLanguage, mode = 'translate', context = '' } = req.body as TranslationRequest;
 
     if (!text || !targetLanguage) {
       return res.status(400).json({ error: 'Text and target language are required' });
     }
 
-    console.log('Translating:', text);
+    console.log('Mode:', mode);
+    console.log('Input text:', text);
     console.log('Target language:', targetLanguage);
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `You are a professional translator. Translate the following text to ${targetLanguage}. 
-                   Maintain all formatting and special characters exactly as they appear. 
-                   Do not modify any placeholders in curly braces like {abc123}.
-                   Only respond with the translated text, nothing else.`
-        },
-        {
-          role: "user",
-          content: text
-        }
-      ],
-      temperature: 0.3,
-    });
-
-    const translatedText = completion.choices[0].message.content?.trim() || '';
+    const translatedText = await translateText(text, '', targetLanguage, mode, context);
     console.log('Translation result:', translatedText);
 
     res.json({ translatedText });
