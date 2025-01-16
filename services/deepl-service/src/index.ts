@@ -10,7 +10,6 @@ app.use(express.json());
 const DEEPL_API_KEY = process.env.DEEPL_API_KEY;
 const DEEPL_API_URL = 'https://api-free.deepl.com/v2/translate';
 
-// Mapping from Paradox language codes to DeepL language codes
 const LANGUAGE_CODE_MAP: Record<string, string> = {
   'l_english': 'EN-GB',
   'l_french': 'FR',

@@ -17,7 +17,6 @@ app.post('/separate', async (req, res) => {
 
     const result: SeparationResult = separator.separateVariables(text);
 
-    // Add variables to queue
     await Promise.all(
       result.variables.map(({ hash, value }) => addToQueue(hash, value))
     );
