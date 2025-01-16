@@ -18,6 +18,14 @@ interface SeparatorResponse {
   variables: Array<{ hash: string; value: string; }>;
 }
 
+interface TranslationStatus {
+  type: 'status';
+  rowId: string;
+  status: 'separating' | 'translating' | 'restoring' | 'completed' | 'error';
+  text?: string;
+  error?: string;
+}
+
 const HEARTBEAT_INTERVAL = 30000;
 const CLIENT_TIMEOUT = 35000;
 
@@ -26,24 +34,32 @@ const VARIABLE_SEPARATOR_URL = process.env.VARIABLE_SEPARATOR_URL || 'http://loc
 const DEEPL_SERVICE_URL = process.env.DEEPL_SERVICE_URL || 'http://localhost:3004';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
+const redis = new Redis(REDIS_URL);
+const subscriber = new Redis(REDIS_URL);
+const publisher = new Redis(REDIS_URL);
+
+const separatorQueue = new Queue('separator', REDIS_URL);
+const deeplQueue = new Queue('deepl', REDIS_URL);
+const restoreQueue = new Queue('restore', REDIS_URL);
+
+const clientMap = new Map<string, WebSocket>();
+
 const wss = new WebSocket.Server({ 
   port: 3001,
-  perMessageDeflate: false,
+  perMessageDeflate: false
 });
 
-function heartbeat(ws: WebSocket) {
-  const client = ws as WebSocket & { isAlive: boolean };
-  client.isAlive = true;
+function heartbeat(ws: WebSocket & { isAlive?: boolean }) {
+  ws.isAlive = true;
 }
 
 const interval = setInterval(() => {
   wss.clients.forEach((ws) => {
-    const client = ws as WebSocket & { isAlive: boolean };
+    const client = ws as WebSocket & { isAlive?: boolean };
     if (client.isAlive === false) {
       console.log('Client timed out, terminating connection');
       return ws.terminate();
     }
-    
     client.isAlive = false;
     client.ping();
   });
@@ -51,82 +67,189 @@ const interval = setInterval(() => {
 
 function containsOnlyHashedVariables(text: string, variables: Array<{ hash: string; value: string; }>): boolean {
   let onlyVarsText = text.trim();
-  
   variables.forEach(({ hash }) => {
     onlyVarsText = onlyVarsText.replace(new RegExp(`{${hash}}`, 'g'), '');
   });
-  
   onlyVarsText = onlyVarsText.replace(/\s+/g, '');
-  
   return onlyVarsText.length === 0;
 }
 
-const handleTranslation = async (ws: WebSocket, message: TranslationRequest) => {
-  try {
-    const separatorResponse = await axios.post<SeparatorResponse>(`${VARIABLE_SEPARATOR_URL}/separate`, {
-      text: message.text
-    });
+subscriber.subscribe('translation-status');
+subscriber.on('message', (channel, message) => {
+  if (channel === 'translation-status') {
+    const status: TranslationStatus = JSON.parse(message);
+    const client = clientMap.get(status.rowId);
+    
+    if (client && client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(status));
+      
+      if (status.status === 'completed' || status.status === 'error') {
+        clientMap.delete(status.rowId);
+      }
+    }
+  }
+});
 
-    const { processedText, variables } = separatorResponse.data;
-    console.log('Separated text:', processedText);
-    console.log('Variables:', variables);
+separatorQueue.process(async (job) => {
+  try {
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'separating'
+    }));
+
+    const response = await axios.post<SeparatorResponse>(
+      `${VARIABLE_SEPARATOR_URL}/separate`,
+      { text: job.data.text }
+    );
+
+    const { processedText, variables } = response.data;
 
     if (containsOnlyHashedVariables(processedText, variables)) {
-      console.log('Text contains only variables, skipping translation');
-      ws.send(JSON.stringify({
-        type: 'translation',
-        rowId: message.rowId,
-        translatedText: message.text
+      publisher.publish('translation-status', JSON.stringify({
+        type: 'status',
+        rowId: job.data.rowId,
+        status: 'completed',
+        text: job.data.text
       }));
+      return { skipTranslation: true, text: job.data.text };
+    }
+
+    const textWithoutVariables = processedText.replace(/\{[^}]+\}/g, '').trim();
+    if (!textWithoutVariables) {
+      publisher.publish('translation-status', JSON.stringify({
+        type: 'status',
+        rowId: job.data.rowId,
+        status: 'completed',
+        text: job.data.text
+      }));
+      return { skipTranslation: true, text: job.data.text };
+    }
+
+    return { ...response.data, skipTranslation: false };
+  } catch (error) {
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'error',
+      error: 'Separation failed'
+    }));
+    throw error;
+  }
+});
+
+deeplQueue.process(async (job) => {
+  try {
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'translating'
+    }));
+
+    const response = await axios.post(
+      `${DEEPL_SERVICE_URL}/translate`,
+      {
+        text: job.data.text,
+        targetLanguage: job.data.targetLanguage
+      }
+    );
+    return response.data;
+  } catch (error) {
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'error',
+      error: 'Translation failed'
+    }));
+    throw error;
+  }
+});
+
+restoreQueue.process(async (job) => {
+  try {
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'restoring'
+    }));
+
+    const response = await axios.post(
+      `${VARIABLE_SEPARATOR_URL}/restore`,
+      {
+        text: job.data.text,
+        variables: job.data.variables
+      }
+    );
+
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'completed',
+      text: response.data.text
+    }));
+
+    return response.data;
+  } catch (error) {
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'error',
+      error: 'Restoration failed'
+    }));
+    throw error;
+  }
+});
+
+const handleTranslation = async (ws: WebSocket, message: TranslationRequest) => {
+  try {
+    clientMap.set(message.rowId, ws);
+
+    const separatorJob = await separatorQueue.add({
+      text: message.text,
+      rowId: message.rowId
+    });
+    const separatorResult = await separatorJob.finished();
+
+    if (separatorResult.skipTranslation) {
       return;
     }
 
-    const deeplResponse = await axios.post(`${DEEPL_SERVICE_URL}/translate`, {
-      text: processedText,
-      targetLanguage: message.targetLanguage
+    const deeplJob = await deeplQueue.add({
+      text: separatorResult.processedText,
+      targetLanguage: message.targetLanguage,
+      rowId: message.rowId
     });
+    const deeplResult = await deeplJob.finished();
 
-    const deeplTranslatedText = deeplResponse.data.translatedText;
-    console.log('DeepL translation:', deeplTranslatedText);
-
-    const restoredResponse = await axios.post(`${VARIABLE_SEPARATOR_URL}/restore`, {
-      text: deeplTranslatedText,
-      variables
+    const restoreJob = await restoreQueue.add({
+      text: deeplResult.translatedText,
+      variables: separatorResult.variables,
+      rowId: message.rowId
     });
-
-    const restoredText = restoredResponse.data.text;
-    console.log('Restored text:', restoredText);
-
-    // const openaiResponse = await axios.post(`${TRANSLATION_SERVICE_URL}/translate`, {
-    //   text: restoredText,
-    //   targetLanguage: message.targetLanguage,
-    //   mode: 'post-process',
-    //   context: 'This is a game translation. Review and improve the translation while keeping the meaning and style consistent with gaming terminology. Preserve all special characters and formatting.'
-    // });
-
-    // const finalText = openaiResponse.data.translatedText;
-    // console.log('Final text after OpenAI post-processing:', finalText);
+    const restoreResult = await restoreJob.finished();
 
     ws.send(JSON.stringify({
       type: 'translation',
       rowId: message.rowId,
-      translatedText: restoredText
+      translatedText: restoreResult.text
     }));
 
   } catch (error) {
     console.error('Translation error:', error);
-    ws.send(JSON.stringify({
+    publisher.publish('translation-status', JSON.stringify({
       type: 'status',
       rowId: message.rowId,
       status: 'error',
-      error: 'Translation failed'
+      error: 'Translation process failed'
     }));
+    clientMap.delete(message.rowId);
   }
 };
 
 wss.on('connection', (ws) => {
   console.log('Client connected');
-  heartbeat(ws);
+  const typedWs = ws as WebSocket & { isAlive?: boolean };
+  heartbeat(typedWs);
 
   ws.on('message', async (data) => {
     try {
@@ -134,12 +257,6 @@ wss.on('connection', (ws) => {
       console.log('Received message:', message);
 
       if (message.type === 'translate') {
-        ws.send(JSON.stringify({
-          type: 'status',
-          rowId: message.rowId,
-          status: 'processing'
-        }));
-
         await handleTranslation(ws, message);
       } else if (message.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
@@ -151,11 +268,35 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('Client disconnected');
+    for (const [rowId, client] of clientMap.entries()) {
+      if (client === ws) {
+        clientMap.delete(rowId);
+      }
+    }
   });
 });
 
 wss.on('close', () => {
   clearInterval(interval);
+  subscriber.quit();
+  publisher.quit();
+  redis.quit();
+});
+
+[separatorQueue, deeplQueue, restoreQueue].forEach(queue => {
+  queue.on('error', (error) => {
+    console.error(`Queue error in ${queue.name}:`, error);
+  });
+
+  queue.on('failed', (job, error) => {
+    console.error(`Job failed in ${queue.name}:`, error);
+    publisher.publish('translation-status', JSON.stringify({
+      type: 'status',
+      rowId: job.data.rowId,
+      status: 'error',
+      error: `${queue.name} job failed`
+    }));
+  });
 });
 
 console.log('WebSocket server is running on port 3001');
