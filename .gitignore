@@ -6,6 +6,11 @@
 .pnp.js
 .yarn/install-state.gz
 
+# services dependencies
+/services/*/node_modules
+/services/translation-service/node_modules
+/services/websocket-service/node_modules
+
 # testing
 /coverage
 

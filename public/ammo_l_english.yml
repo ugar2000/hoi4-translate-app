@@ -40,5 +40,5 @@
  cost_0_tooltip: "This purchase will cost §Hbillions§!"
  ammo_eff: "Focus on Ammo Production"
  ammo_eff_idea: "Focusing on Ammo Production"
- ammo_eff_idea: "Trade military equipment production efficiency for ammo production efficiency."
+ ammo_eff_idea_desc: "Trade military equipment production efficiency for ammo production efficiency."
  

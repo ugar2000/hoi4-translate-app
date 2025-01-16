@@ -32,7 +32,7 @@ const FileAndLanguageSelector = () => {
                     for (const line of lines) {
                         const [code, text] = line.split(/:(.*)/s);
                         if (!code || !text) continue;
-                        rows.push({code, text, translatedText: ''});
+                        rows.push({code: code.trim(), text, translatedText: ''});
                     }
                     setRows(rows);
                 }

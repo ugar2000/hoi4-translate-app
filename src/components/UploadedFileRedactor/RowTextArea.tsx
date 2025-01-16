@@ -4,30 +4,32 @@ import React, { FC, useEffect, useRef, useState, useCallback } from "react";
 import { getCaretCoordinates } from "@/helpers";
 
 const colorMap = {
-    C: 'text-cyan-400',       // (35, 206, 255)
-    L: 'text-[#c3b091]',       // (195, 176, 145)
-    W: 'text-white',           // (255, 255, 255)
-    T: 'text-white',           // (255, 255, 255)
-    B: 'text-blue-500',        // (0, 0, 255)
-    G: 'text-green-500',       // (0, 159, 3)
-    R: 'text-red-500',         // (255, 50, 50)
-    b: 'text-black',           // (0, 0, 0)
-    g: 'text-gray-400',        // (176, 176, 176)
-    Y: 'text-yellow-400',      // (255, 189, 0)
-    H: 'text-yellow-400',      // (255, 189, 0)
-    O: 'text-orange-500',      // (255, 112, 25)
-    '0': 'text-purple-500',    // (203, 0, 203)
-    '1': 'text-[#8078d3]',     // (128, 120, 211)
-    '2': 'text-[#5170f3]',     // (81, 112, 243)
-    '3': 'text-[#518fdc]',     // (81, 143, 220)
-    '4': 'text-[#5abe3]',      // (90, 190, 231)
-    '5': 'text-[#3fb5c2]',     // (63, 181, 194)
-    '6': 'text-[#77ccb6]',     // (119, 204, 186)
-    '7': 'text-[#99d199]',     // (153, 209, 153)
-    '8': 'text-[#cca333]',     // (204, 163, 51)
-    '9': 'text-[#fca97d]',     // (252, 169, 125)
-    t: 'text-red-600',         // (255, 76, 77)
+    C: 'text-cyan-400',
+    L: 'text-[#c3b091]',
+    W: 'text-white',
+    T: 'text-white',
+    B: 'text-blue-500',
+    G: 'text-green-500',
+    R: 'text-red-500',
+    b: 'text-black',
+    g: 'text-gray-400',
+    Y: 'text-yellow-400',
+    H: 'text-yellow-400',
+    O: 'text-orange-500',
+    '0': 'text-purple-500',
+    '1': 'text-[#8078d3]',
+    '2': 'text-[#5170f3]',
+    '3': 'text-[#518fdc]',
+    '4': 'text-[#5abe3]',
+    '5': 'text-[#3fb5c2]',
+    '6': 'text-[#77ccb6]',
+    '7': 'text-[#99d199]',
+    '8': 'text-[#cca333]',
+    '9': 'text-[#fca97d]',
+    t: 'text-red-600',
 };
+
+type ColorMapKey = keyof typeof colorMap;
 
 interface Props {
     value: string;
@@ -39,20 +41,31 @@ interface Props {
 const RowTextArea: FC<Props> = ({ value, onBlur, onInput, className }) => {
     const [editingValue, setEditingValue] = useState(value);
     const [isFocused, setIsFocused] = useState(false);
+    const [cursorPosition, setCursorPosition] = useState<number | null>(null);
+    const [lineHeight, setLineHeight] = useState(20);
     const textAreaRef = useRef<HTMLTextAreaElement>(null);
     const displayRef = useRef<HTMLDivElement>(null);
     const cursorRef = useRef<HTMLDivElement>(null);
-    const mirrorRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         setEditingValue(value);
     }, [value]);
 
+    useEffect(() => {
+        if (displayRef.current) {
+            const computedStyle = window.getComputedStyle(displayRef.current);
+            const computed = parseInt(computedStyle.lineHeight);
+            if (!isNaN(computed)) {
+                setLineHeight(computed);
+            }
+        }
+    }, []);
+
     const updateDisplay = useCallback(() => {
         if (displayRef.current) {
             displayRef.current.innerHTML = editingValue
                 .replace(/§([A-Za-z0-9t])([^§]*)§!/g, (match, tag, text) => {
-                    const colorClass = colorMap[tag] || '';
+                    const colorClass = colorMap[tag as ColorMapKey] || '';
                     return `<span class="${colorClass}">§${tag}${text}§!</span>`;
                 })
                 .replace(/\[([^\]]+)\]/g, '<span class="text-pink-500">[$1]</span>')
@@ -60,38 +73,34 @@ const RowTextArea: FC<Props> = ({ value, onBlur, onInput, className }) => {
         }
     }, [editingValue]);
 
-    const updateMirror = useCallback(() => {
-        if (mirrorRef.current) {
-            const safeText = editingValue
-                .replace(/§([A-Za-z0-9t])([^§]*)§!/g, (match, tag, text) => `§${tag}${text}§!`)
-                .replace(/\[([^\]]+)\]/g, '[$1]')
-                .replace(/\n/g, '<br/>');
-            mirrorRef.current.innerHTML = safeText + '<span id="caret-marker">|</span>';
-        }
-    }, [editingValue]);
-
     const updateCursorPosition = useCallback(() => {
-        if (!cursorRef.current) return;
+        if (!cursorRef.current || !textAreaRef.current || !displayRef.current) return;
 
-        updateMirror();
+        const position = textAreaRef.current.selectionStart;
+        setCursorPosition(position);
 
-        const marker = mirrorRef.current?.querySelector("#caret-marker");
-        if (marker) {
-            const rect = marker.getBoundingClientRect();
-            const containerRect = displayRef.current?.getBoundingClientRect();
-            if (rect && containerRect) {
-                const top = rect.top - containerRect.top;
-                const left = rect.left - containerRect.left;
-                cursorRef.current.style.top = `${top + 7}px`;
-                cursorRef.current.style.left = `${left + 8}px`;
-            }
-        } else if (textAreaRef.current) {
-            const cursorPosition = textAreaRef.current.selectionStart;
-            const cursorCoords = getCaretCoordinates(textAreaRef.current, cursorPosition);
-            cursorRef.current.style.top = `${cursorCoords.top}px`;
-            cursorRef.current.style.left = `${cursorCoords.left}px`;
-        }
-    }, [updateMirror]);
+        const textBeforeCursor = editingValue.substring(0, position);
+        
+        const lines = textBeforeCursor.split('\n');
+        const currentLineNumber = lines.length - 1;
+        const currentLine = lines[currentLineNumber];
+        
+        const measureSpan = document.createElement('span');
+        measureSpan.style.font = window.getComputedStyle(displayRef.current).font;
+        measureSpan.style.whiteSpace = 'pre';
+        measureSpan.textContent = currentLine;
+        displayRef.current.appendChild(measureSpan);
+        
+        const textWidth = measureSpan.getBoundingClientRect().width;
+        displayRef.current.removeChild(measureSpan);
+
+        const padding = 16;
+        const top = currentLineNumber * lineHeight + padding + 5;
+        const left = textWidth + padding + 3;
+
+        cursorRef.current.style.top = `${top}px`;
+        cursorRef.current.style.left = `${left}px`;
+    }, [editingValue, lineHeight]);
 
     useEffect(() => {
         updateDisplay();
@@ -110,6 +119,12 @@ const RowTextArea: FC<Props> = ({ value, onBlur, onInput, className }) => {
     const handleBlur = () => {
         setIsFocused(false);
         onBlur(editingValue);
+    };
+
+    const handleClick = (event: React.MouseEvent<HTMLTextAreaElement>) => {
+        requestAnimationFrame(() => {
+            updateCursorPosition();
+        });
     };
 
     useEffect(() => {
@@ -140,13 +155,13 @@ const RowTextArea: FC<Props> = ({ value, onBlur, onInput, className }) => {
         };
     }, [isFocused, updateCursorPosition]);
 
-    const handleKeyUp = () => {
+    const handleKeyUp = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
         requestAnimationFrame(() => {
             updateCursorPosition();
         });
     };
 
-    const handleSelect = () => {
+    const handleSelect = (event: React.SyntheticEvent<HTMLTextAreaElement>) => {
         requestAnimationFrame(() => {
             updateCursorPosition();
         });
@@ -154,6 +169,7 @@ const RowTextArea: FC<Props> = ({ value, onBlur, onInput, className }) => {
 
     const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         setEditingValue(event.target.value);
+        setCursorPosition(event.target.selectionStart);
     };
 
     return (
@@ -166,32 +182,19 @@ const RowTextArea: FC<Props> = ({ value, onBlur, onInput, className }) => {
                 onBlur={handleBlur}
                 onSelect={handleSelect}
                 onKeyUp={handleKeyUp}
-                className="absolute top-0 left-0 w-full h-full text-sm opacity-0 resize-none overflow-hidden"
+                onClick={handleClick}
+                className="absolute top-0 left-0 w-full h-full text-sm opacity-0 resize-none overflow-hidden z-10 p-4 font-mono whitespace-pre-wrap"
             />
             <div
                 ref={displayRef}
-                className="w-full h-full p-4 font-mono text-sm bg-gray-800 text-white rounded-md focus:outline-none whitespace-pre-wrap"
-            />
-            <div
-                ref={mirrorRef}
-                className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none opacity-0 whitespace-pre-wrap font-mono text-sm p-4"
+                className="w-full h-full p-4 font-mono text-sm bg-gray-800 text-white rounded-md focus:outline-none whitespace-pre-wrap leading-[20px]"
             />
             {isFocused && (
                 <div
                     ref={cursorRef}
-                    className="absolute w-px h-[1em] bg-white animate-blink pointer-events-none"
+                    className="absolute w-[2px] h-[20px] bg-white animate-blink pointer-events-none"
                 />
             )}
-            <style jsx>{`
-                @keyframes blink {
-                    0% { opacity: 1; }
-                    50% { opacity: 0; }
-                    100% { opacity: 1; }
-                }
-                .animate-blink {
-                    animation: blink 1s step-start infinite;
-                }
-            `}</style>
         </div>
     );
 };

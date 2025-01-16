@@ -11,18 +11,15 @@ const properties = [
     'height',
     'overflowX',
     'overflowY',
-
     'borderTopWidth',
     'borderRightWidth',
     'borderBottomWidth',
     'borderLeftWidth',
     'borderStyle',
-
     'paddingTop',
     'paddingRight',
     'paddingBottom',
     'paddingLeft',
-
     'fontStyle',
     'fontVariant',
     'fontWeight',
@@ -31,84 +28,79 @@ const properties = [
     'fontSizeAdjust',
     'lineHeight',
     'fontFamily',
-
     'textAlign',
     'textTransform',
     'textIndent',
     'textDecoration',
-
     'letterSpacing',
     'wordSpacing',
-
     'tabSize',
-    'MozTabSize'
+] as const;
 
-];
+type StyleProperty = typeof properties[number];
 
 const isBrowser = (typeof window !== 'undefined');
-const isFirefox = (isBrowser && window.mozInnerScreenX != null);
 
-export function getCaretCoordinates(element: HTMLElement, position: number, options?: CaretPositionOptions): CaretPosition {
-    if (!isBrowser) {
-        throw new Error('textarea-caret-position#getCaretCoordinates should only be called in a browser');
-    }
+let mirrorDiv: HTMLDivElement | null = null;
 
-    var debug = options && options.debug || false;
-    if (debug) {
-        var el = document.querySelector('#input-textarea-caret-position-mirror-div');
-        if (el) el.parentNode.removeChild(el);
-    }
-
-    var div = document.createElement('div');
+function createMirrorDiv(): HTMLDivElement {
+    const div = document.createElement('div');
     div.id = 'input-textarea-caret-position-mirror-div';
+    div.style.position = 'absolute';
+    div.style.visibility = 'hidden';
+    div.style.whiteSpace = 'pre-wrap';
+    div.style.wordWrap = 'break-word';
     document.body.appendChild(div);
+    return div;
+}
 
-    var style = div.style;
-    var computed = window.getComputedStyle ? window.getComputedStyle(element) : element.currentStyle;  // currentStyle for IE < 9
-    var isInput = element.nodeName === 'INPUT';
-
-    style.whiteSpace = 'pre-wrap';
-    if (!isInput)
-        style.wordWrap = 'break-word';  // only for textarea-s
-
-    style.position = 'absolute';
-    if (!debug)
-        style.visibility = 'hidden';
-
-    properties.forEach(function (prop) {
-        if (isInput && prop === 'lineHeight') {
-            style.lineHeight = computed.height;
-        } else {
-            style[prop] = computed[prop];
-        }
-    });
-
-    if (isFirefox) {
-        if (element.scrollHeight > parseInt(computed.height))
-            style.overflowY = 'scroll';
-    } else {
-        style.overflow = 'hidden';
+function getMirrorDiv(): HTMLDivElement {
+    if (!mirrorDiv) {
+        mirrorDiv = createMirrorDiv();
     }
+    return mirrorDiv;
+}
+
+function copyStyles(source: HTMLElement, target: HTMLElement): void {
+    const computed = window.getComputedStyle(source);
+    properties.forEach((prop) => {
+        target.style[prop] = computed[prop];
+    });
+}
+
+export function getCaretCoordinates(element: HTMLInputElement | HTMLTextAreaElement, position: number, options?: CaretPositionOptions): CaretPosition {
+    if (!isBrowser) {
+        throw new Error('getCaretCoordinates should only be called in a browser environment');
+    }
+
+    const isInput = element.nodeName === 'INPUT';
+    const div = getMirrorDiv();
+
+    copyStyles(element, div);
 
     div.textContent = element.value.substring(0, position);
-    if (isInput)
+    if (isInput) {
         div.textContent = div.textContent.replace(/\s/g, '\u00a0');
+    }
 
-    var span = document.createElement('span');
+    const span = document.createElement('span');
     span.textContent = element.value.substring(position) || '.';
     div.appendChild(span);
 
-    var coordinates = {
-        top: span.offsetTop + parseInt(computed['borderTopWidth']),
-        left: span.offsetLeft + parseInt(computed['borderLeftWidth']),
-        height: parseInt(computed['lineHeight'])
+    const coordinates: CaretPosition = {
+        top: span.offsetTop + parseInt(window.getComputedStyle(element).borderTopWidth),
+        left: span.offsetLeft + parseInt(window.getComputedStyle(element).borderLeftWidth),
+        height: parseInt(window.getComputedStyle(element).lineHeight)
     };
 
-    if (debug) {
-        span.style.backgroundColor = '#aaa';
-    } else {
-        document.body.removeChild(div);
-    }
+    div.removeChild(span);
+    div.textContent = '';
 
     return coordinates;
+}
+
+export function trimToSecondLastUnderscore(str: string) {
+    const regex = /^(.*_)(?=[^_]*_[^_]*$)/;
+    const match = str.match(regex);
+    return match ? match[1] : str;
 }
