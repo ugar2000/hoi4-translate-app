@@ -27,6 +27,17 @@ services:
       - REDIS_URL=redis://redis:6379
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DEEPL_API_KEY=${DEEPL_API_KEY}
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./services/translation-service/src
+          target: /app/src
+        - action: sync
+          path: ./services/translation-service/tsconfig.json
+          target: /app/tsconfig.json
+        - action: rebuild
+          path: ./services/translation-service/package.json
     ports:
       - "3002:3002"
     depends_on:
@@ -36,6 +47,17 @@ services:
     build:
       context: ./services/websocket-service
       dockerfile: Dockerfile
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./services/websocket-service/src
+          target: /app/src
+        - action: sync
+          path: ./services/websocket-service/tsconfig.json
+          target: /app/tsconfig.json
+        - action: rebuild
+          path: ./services/websocket-service/package.json
     ports:
       - "3001:3001"
     environment:
@@ -53,6 +75,17 @@ services:
     build:
       context: ./services/variable-separator
       dockerfile: Dockerfile
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./services/variable-separator/src
+          target: /app/src
+        - action: sync
+          path: ./services/variable-separator/tsconfig.json
+          target: /app/tsconfig.json
+        - action: rebuild
+          path: ./services/variable-separator/package.json
     ports:
       - "3003:3003"
     environment:
@@ -64,6 +97,17 @@ services:
     build:
       context: ./services/deepl-service
       dockerfile: Dockerfile
+    command: npm run dev
+    develop:
+      watch:
+        - action: sync
+          path: ./services/deepl-service/src
+          target: /app/src
+        - action: sync
+          path: ./services/deepl-service/tsconfig.json
+          target: /app/tsconfig.json
+        - action: rebuild
+          path: ./services/deepl-service/package.json
     ports:
       - "3004:3004"
     environment:
