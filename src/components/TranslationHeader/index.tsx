@@ -5,20 +5,26 @@ interface Props {
     className?: string;
     onTranslateAll: () => void;
     onGenerateFile: () => void;
+    onSaveTranslation: () => void;
     hasUntranslatedRows: boolean;
     isConnected: boolean;
     fileName: string;
     targetLang: string;
+    canSave: boolean;
+    isSaving: boolean;
 }
 
 const TranslationHeader: React.FC<Props> = ({
     className,
     onTranslateAll,
     onGenerateFile,
+    onSaveTranslation,
     hasUntranslatedRows,
     isConnected,
     fileName,
-    targetLang
+    targetLang,
+    canSave,
+    isSaving
 }) => {
     return (
         <div className={`flex justify-between items-center mb-4 ${className}`}>
@@ -39,6 +45,14 @@ const TranslationHeader: React.FC<Props> = ({
                     size="sm"
                 >
                     Generate {targetLang} File
+                </Button>
+                <Button
+                    onClick={onSaveTranslation}
+                    disabled={!canSave || isSaving}
+                    variant="secondary"
+                    size="sm"
+                >
+                    {isSaving ? 'Saving…' : 'Save Translation'}
                 </Button>
             </div>
         </div>

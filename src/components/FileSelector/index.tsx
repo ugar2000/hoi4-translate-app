@@ -27,7 +27,13 @@ const FileAndLanguageSelector = () => {
 
                 if (yamlContent) {
                     const lines = (yamlContent as String).split('\n');
-                    setOriginLang(selectedLanguage);
+                    const headerLine = lines.find((line) => line.trim().length > 0);
+                    if (headerLine) {
+                        const match = headerLine.match(/^(\w+):/);
+                        if (match) {
+                            setOriginLang(match[1] as LANGUAGE_CODES);
+                        }
+                    }
                     const rows: LineItem[] = []
                     for (const line of lines) {
 

@@ -26,6 +26,7 @@
 *.pem
 
 .env
+!services/**/.env
 
 # debug
 npm-debug.log*
