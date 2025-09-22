@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3005/api'
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -11,7 +13,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const res = await fetch('/api/login', {
+    const res = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -19,6 +21,7 @@ export default function LoginPage() {
     if (res.ok) {
       const data = await res.json()
       localStorage.setItem('token', data.token)
+      window.dispatchEvent(new Event('auth-changed'))
       router.push('/')
     } else {
       alert('Login failed')

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useContext, useEffect, useRef, useState, useCallback } from "react";
+import { io, Socket } from 'socket.io-client';
 import { FileContext } from "@/components/FileContext";
 import RowTextArea from "@/components/UploadedFileRedactor/RowTextArea";
 import TranslationHeader from "@/components/TranslationHeader";
@@ -13,121 +14,136 @@ interface Props {
     className?: string;
 }
 
+const SOCKET_BASE_URL = (process.env.NEXT_PUBLIC_API_WS_URL ?? 'http://localhost:3005').replace(/\/$/, '');
+const SOCKET_NAMESPACE = `${SOCKET_BASE_URL}/translate`;
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3005/api').replace(/\/$/, '');
+
+type GatewayStatus = 'processing' | 'completed' | 'error';
+
 const UploadedFileRedactor: React.FC<Props> = ({ className }) => {
-    const { rows, updateRow, file, targetLang, translationStatus, updateTranslationStatus } = useContext(FileContext);
-    const wsRef = useRef<WebSocket | null>(null);
+    const { rows, updateRow, file, targetLang, originLang, translationStatus, updateTranslationStatus } = useContext(FileContext);
+    const socketRef = useRef<Socket | null>(null);
+    const joinedRowsRef = useRef<Set<string>>(new Set());
+    const rowsRef = useRef(rows);
     const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed' | 'error'>('closed');
-    const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
-    const pingIntervalRef = useRef<NodeJS.Timeout>();
+    const [isSaving, setIsSaving] = useState(false);
 
-    const startPingInterval = () => {
-        if (pingIntervalRef.current) {
-            clearInterval(pingIntervalRef.current);
-        }
-        pingIntervalRef.current = setInterval(() => {
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({ type: 'ping' }));
-            }
-        }, 25000);
-    };
+    useEffect(() => {
+        rowsRef.current = rows;
+    }, [rows]);
 
-    const handleMessage = useCallback((event: MessageEvent) => {
-        try {
-            console.log('Received message:', event.data);
-            const data = JSON.parse(event.data);
-            if (data.type === 'pong') {
-                return;
-            }
-            console.log('Parsed message:', data);
-            
-            if (data.type === 'translation') {
-                console.log('Translation received:', data);
-                const { rowId, translatedText } = data;
-                console.log('Current rows:', rows);
-                console.log('Looking for rowId:', rowId);
-                
-                const row = rows.find((r) => r.code === rowId);
-                console.log('Row found:', row);
-                
-                if (row) {
-                    console.log('Updating row:', row);
-                    console.log('Translated text:', translatedText);
-                    updateRow({ ...row, translatedText });
-                    updateTranslationStatus(rowId, 'completed');
-                }
-            } else if (data.type === 'status') {
-                const { rowId, status, error } = data;
-                updateTranslationStatus(rowId, status);
-                if (error) {
-                    console.error(`Translation error for ${rowId}:`, error);
-                }
-            }
-        } catch (error) {
-            console.error('WebSocket message parse error:', error);
-        }
-    }, [rows, updateRow, updateTranslationStatus]);
+    useEffect(() => {
+        const socket = io(SOCKET_NAMESPACE, {
+            transports: ['websocket'],
+            autoConnect: true,
+            reconnection: true,
+        });
+        socketRef.current = socket;
+        const joinedRooms = joinedRowsRef.current;
 
-    const connect = useCallback(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-            console.log('WebSocket already connected');
-            return;
-        }
-
-        console.log('Connecting to WebSocket...');
-        wsRef.current = new WebSocket('ws://localhost:3001', 'translator-protocol');
-        setWsState('connecting');
-
-        wsRef.current.onopen = () => {
-            console.log('WebSocket connected');
+        const handleConnect = () => {
             setWsState('open');
-            startPingInterval();
+            rowsRef.current.forEach((row) => {
+                if (row.code && !joinedRooms.has(row.code)) {
+                    socket.emit('join-row', { rowId: row.code });
+                }
+            });
         };
 
-        wsRef.current.onerror = (error) => {
+        const handleDisconnect = () => {
+            setWsState('closed');
+        };
+
+        const handleError = (error: Error) => {
             console.error('WebSocket error:', error);
             setWsState('error');
         };
 
-        wsRef.current.onclose = (event) => {
-            console.log('WebSocket closed, code:', event.code, 'reason:', event.reason);
-            setWsState('closed');
-            if (pingIntervalRef.current) {
-                clearInterval(pingIntervalRef.current);
+        const handleReconnectAttempt = () => {
+            setWsState('connecting');
+        };
+
+        socket.on('connect', handleConnect);
+        socket.on('disconnect', handleDisconnect);
+        socket.on('connect_error', handleError);
+        socket.on('reconnect_attempt', handleReconnectAttempt);
+        socket.on('reconnect', handleConnect);
+        socket.on('joined-row', ({ rowId }: { rowId?: string }) => {
+            if (rowId) {
+                joinedRooms.add(rowId);
             }
-            
-            if (event.code !== 1000) {
-                console.log('Attempting to reconnect in 5s...');
-                if (reconnectTimeoutRef.current) {
-                    clearTimeout(reconnectTimeoutRef.current);
-                }
-                reconnectTimeoutRef.current = setTimeout(connect, 5000);
-            }
+        });
+
+        if (socket.connected) {
+            handleConnect();
+        } else {
+            setWsState('connecting');
+        }
+
+        return () => {
+            socket.off('connect', handleConnect);
+            socket.off('disconnect', handleDisconnect);
+            socket.off('connect_error', handleError);
+            socket.off('reconnect_attempt', handleReconnectAttempt);
+            socket.off('reconnect', handleConnect);
+            socket.off('joined-row');
+            socket.disconnect();
+            socketRef.current = null;
+            joinedRooms.clear();
         };
     }, []);
 
     useEffect(() => {
-        if (wsRef.current) {
-            wsRef.current.onmessage = handleMessage;
+        const socket = socketRef.current;
+        if (!socket) {
+            return;
         }
-    }, [handleMessage]);
 
-    useEffect(() => {
-        connect();
+        const handleTranslation = (data: { rowId?: string; translatedText?: string }) => {
+            if (!data?.rowId) {
+                return;
+            }
 
-        return () => {
-            if (wsRef.current) {
-                console.log('Cleaning up WebSocket connection');
-                wsRef.current.close(1000, 'Component unmounting');
-                wsRef.current = null;
-            }
-            if (reconnectTimeoutRef.current) {
-                clearTimeout(reconnectTimeoutRef.current);
-            }
-            if (pingIntervalRef.current) {
-                clearInterval(pingIntervalRef.current);
+            const currentRows = rowsRef.current;
+            const row = currentRows.find((r) => r.code === data.rowId);
+            if (row && typeof data.translatedText === 'string') {
+                updateRow({ ...row, translatedText: data.translatedText });
+                updateTranslationStatus(data.rowId, 'completed');
             }
         };
-    }, [connect]);
+
+        const handleStatus = (data: { rowId?: string; status?: GatewayStatus; error?: string }) => {
+            if (!data?.rowId || !data.status) {
+                return;
+            }
+
+            updateTranslationStatus(data.rowId, data.status);
+            if (data.error) {
+                console.error(`Translation error for ${data.rowId}:`, data.error);
+            }
+        };
+
+        socket.on('translation', handleTranslation);
+        socket.on('status', handleStatus);
+
+        return () => {
+            socket.off('translation', handleTranslation);
+            socket.off('status', handleStatus);
+        };
+    }, [updateRow, updateTranslationStatus]);
+
+    useEffect(() => {
+        const socket = socketRef.current;
+        if (!socket || !socket.connected) {
+            return;
+        }
+
+        rows.forEach((row) => {
+            if (row.code && !joinedRowsRef.current.has(row.code)) {
+                socket.emit('join-row', { rowId: row.code });
+            }
+        });
+    }, [rows]);
 
     const handleTextChange = (index: number, newText: string) => {
         updateRow({ ...rows[index], text: newText });
@@ -138,26 +154,47 @@ const UploadedFileRedactor: React.FC<Props> = ({ className }) => {
         updateRow({ ...rows[index], translatedText: newTranslatedText });
     };
 
-    const handleTranslate = (code: string, text: string) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-            console.log('Sending translation request:', { code, text });
-            wsRef.current.send(JSON.stringify({
-                type: 'translate',
-                text,
-                targetLanguage: targetLang,
-                rowId: code,
-            }));
-            updateTranslationStatus(code, 'queued');
-        } else {
-            console.error('WebSocket is not connected. Current state:', wsState);
-            connect();
+    const ensureJoined = useCallback((rowId: string) => {
+        const socket = socketRef.current;
+        if (!socket || !rowId) {
+            return;
         }
+
+        if (!joinedRowsRef.current.has(rowId)) {
+            socket.emit('join-row', { rowId });
+        }
+    }, []);
+
+    const handleTranslate = (code: string, text: string) => {
+        const socket = socketRef.current;
+        if (!socket) {
+            console.error('WebSocket is not initialized');
+            return;
+        }
+
+        if (!socket.connected) {
+            console.error('WebSocket is not connected. Current state:', wsState);
+            setWsState('connecting');
+            socket.connect();
+            return;
+        }
+
+        ensureJoined(code);
+
+        socket.emit('translate-row', {
+            rowId: code,
+            text,
+            targetLanguage: targetLang,
+        });
+        updateTranslationStatus(code, 'queued');
     };
 
     const handleTranslateAll = () => {
-        if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        const socket = socketRef.current;
+        if (!socket?.connected) {
             console.error('WebSocket is not connected. Current state:', wsState);
-            connect();
+            socket?.connect();
+            setWsState('connecting');
             return;
         }
 
@@ -169,8 +206,8 @@ const UploadedFileRedactor: React.FC<Props> = ({ className }) => {
         });
     };
 
-    const handleGenerateFile = () => {
-        if (!file) return;
+    const buildTranslatedFile = () => {
+        if (!file) return null;
 
         const fileName = file.name;
         const baseName = trimToSecondLastUnderscore(fileName);
@@ -183,21 +220,86 @@ const UploadedFileRedactor: React.FC<Props> = ({ className }) => {
             }
         });
 
-        const blob = new Blob([fileContent], { type: 'text/yaml' });
+        return { fileName: targetFileName, content: fileContent };
+    };
+
+    const handleGenerateFile = () => {
+        const translated = buildTranslatedFile();
+        if (!translated) return;
+
+        const blob = new Blob([translated.content], { type: 'text/yaml' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = targetFileName;
+        a.download = translated.fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
 
+    const handleSaveTranslation = async () => {
+        if (!file) {
+            alert('Please upload a file before saving.');
+            return;
+        }
+
+        const translated = buildTranslatedFile();
+        if (!translated) {
+            alert('Nothing to save yet.');
+            return;
+        }
+
+        if (!targetLang) {
+            alert('Please select a target language before saving.');
+            return;
+        }
+
+        const token = localStorage.getItem('token');
+        if (!token) {
+            alert('You need to be logged in to save your translation history.');
+            return;
+        }
+
+        const sourceLang = originLang || 'unknown';
+
+        const formData = new FormData();
+        formData.append('originLang', sourceLang);
+        formData.append('translatedLang', targetLang);
+        formData.append('original', file, file.name);
+        const translatedBlob = new Blob([translated.content], { type: 'text/yaml' });
+        const translatedFile = new File([translatedBlob], translated.fileName, { type: 'text/yaml' });
+        formData.append('translated', translatedFile);
+
+        try {
+            setIsSaving(true);
+            const response = await fetch(`${API_BASE_URL}/history`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: formData,
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to save translation (status ${response.status})`);
+            }
+
+            alert('Translation saved to your history.');
+        } catch (error) {
+            console.error('Failed to save translation', error);
+            alert('Failed to save translation history. Please try again.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const hasUntranslatedRows = rows.some(row => {
         const status = translationStatus[row.code];
         return status !== 'processing' && status !== 'queued' && !row.translatedText;
     });
+
+    const hasTranslatedRows = rows.some(row => row.translatedText && row.translatedText.trim().length > 0);
 
     if (!file || rows.length === 0) return null;
 
@@ -211,10 +313,13 @@ const UploadedFileRedactor: React.FC<Props> = ({ className }) => {
             <TranslationHeader
                 onTranslateAll={handleTranslateAll}
                 onGenerateFile={handleGenerateFile}
+                onSaveTranslation={handleSaveTranslation}
                 hasUntranslatedRows={hasUntranslatedRows}
                 isConnected={wsState === 'open'}
                 fileName={file.name}
                 targetLang={targetLang}
+                canSave={hasTranslatedRows}
+                isSaving={isSaving}
             />
             <div className="grid grid-cols-[auto_1fr_1fr_auto] gap-2">
                 {rows.map((row, index) => (

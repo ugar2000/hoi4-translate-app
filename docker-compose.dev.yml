@@ -15,6 +15,8 @@ services:
       - NODE_ENV=development
     ports:
       - "3000:3000"
+    env_file:
+      - ./.env
 
   # Development overrides for translator service
   translator-service:
@@ -22,6 +24,8 @@ services:
     volumes:
       - ./services/deepl-service:/app
       - /app/node_modules
+    env_file:
+      - ./services/deepl-service/.env
 
   # Development overrides for websocket service  
   websocket-service:
@@ -29,6 +33,8 @@ services:
     volumes:
       - ./services/websocket-service:/app
       - /app/node_modules
+    env_file:
+      - ./services/websocket-service/.env
 
   # Development database with exposed ports
   db:
@@ -39,3 +45,34 @@ services:
   redis:
     ports:
       - "6379:6379"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    env_file:
+      - ./services/minio/.env
+
+  api-service:
+    command: npm run start:dev
+    volumes:
+      - ./services/api-service:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    ports:
+      - "3005:3005"
+    env_file:
+      - ./services/api-service/.env
+
+  translation-service:
+    command: npm run start:dev
+    volumes:
+      - ./services/translation-service:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    ports:
+      - "4001:4001"
+    env_file:
+      - ./services/translation-service/.env
