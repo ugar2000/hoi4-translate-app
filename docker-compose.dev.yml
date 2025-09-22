@@ -1,0 +1,41 @@
+# Development override for docker-compose
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # Development overrides for web app
+  web-app:
+    build:
+      target: deps  # Stop at deps stage for development
+    command: npm run dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+    ports:
+      - "3000:3000"
+
+  # Development overrides for translator service
+  translator-service:
+    command: npm run dev
+    volumes:
+      - ./services/deepl-service:/app
+      - /app/node_modules
+
+  # Development overrides for websocket service  
+  websocket-service:
+    command: npm run dev
+    volumes:
+      - ./services/websocket-service:/app
+      - /app/node_modules
+
+  # Development database with exposed ports
+  db:
+    ports:
+      - "5432:5432"
+    
+  # Development Redis with exposed ports
+  redis:
+    ports:
+      - "6379:6379"

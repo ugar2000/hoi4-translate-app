@@ -1,6 +1,5 @@
-version: '3.8'
-
 services:
+  # Database
   db:
     image: postgres:15-alpine
     restart: always
@@ -12,108 +11,94 @@ services:
       - db-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    networks:
+      - app-network
+      
+  # Redis for queue management
   redis:
     image: redis:alpine
+    restart: always
     ports:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    networks:
+      - app-network
 
-  translation-service:
+  # Main Next.js Application
+  web-app:
     build:
-      context: ./services/translation-service
-      dockerfile: Dockerfile
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - DEEPL_API_KEY=${DEEPL_API_KEY}
-    command: npm run dev
-    develop:
-      watch:
-        - action: sync
-          path: ./services/translation-service/src
-          target: /app/src
-        - action: sync
-          path: ./services/translation-service/tsconfig.json
-          target: /app/tsconfig.json
-        - action: rebuild
-          path: ./services/translation-service/package.json
+      context: .
+      dockerfile: dockerfiles/web-app.Dockerfile
     ports:
-      - "3002:3002"
-    depends_on:
-      - redis
-
-  websocket-service:
-    build:
-      context: ./services/websocket-service
-      dockerfile: Dockerfile
-    command: npm run dev
-    develop:
-      watch:
-        - action: sync
-          path: ./services/websocket-service/src
-          target: /app/src
-        - action: sync
-          path: ./services/websocket-service/tsconfig.json
-          target: /app/tsconfig.json
-        - action: rebuild
-          path: ./services/websocket-service/package.json
-    ports:
-      - "3001:3001"
+      - "3000:3000"
     environment:
-      - REDIS_URL=redis://redis:6379
-      - TRANSLATION_SERVICE_URL=http://translation-service:3002
-      - VARIABLE_SEPARATOR_URL=http://variable-separator:3003
-      - DEEPL_SERVICE_URL=http://deepl-service:3004
+      - DATABASE_URL=postgresql://user:password@db:5432/translator
+      - JWT_SECRET=your-jwt-secret-change-in-production
+      - NEXTAUTH_SECRET=your-nextauth-secret-change-in-production
+      - NEXTAUTH_URL=http://localhost:3000
     depends_on:
+      - db
       - redis
-      - translation-service
-      - variable-separator
-      - deepl-service
+    networks:
+      - app-network
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
 
-  variable-separator:
-    build:
-      context: ./services/variable-separator
-      dockerfile: Dockerfile
-    command: npm run dev
-    develop:
-      watch:
-        - action: sync
-          path: ./services/variable-separator/src
-          target: /app/src
-        - action: sync
-          path: ./services/variable-separator/tsconfig.json
-          target: /app/tsconfig.json
-        - action: rebuild
-          path: ./services/variable-separator/package.json
-    ports:
-      - "3003:3003"
-    environment:
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      - redis
-
-  deepl-service:
+  # Microsoft Translator Service
+  translator-service:
     build:
       context: ./services/deepl-service
-      dockerfile: Dockerfile
-    command: npm run dev
-    develop:
-      watch:
-        - action: sync
-          path: ./services/deepl-service/src
-          target: /app/src
-        - action: sync
-          path: ./services/deepl-service/tsconfig.json
-          target: /app/tsconfig.json
-        - action: rebuild
-          path: ./services/deepl-service/package.json
+      dockerfile: ../../dockerfiles/translator-service.Dockerfile
     ports:
       - "3004:3004"
     environment:
-      - DEEPL_API_KEY=${DEEPL_API_KEY}
+      - PORT=3004
+      - MICROSOFT_TRANSLATOR_KEY=${MICROSOFT_TRANSLATOR_KEY}
+      - MICROSOFT_TRANSLATOR_REGION=${MICROSOFT_TRANSLATOR_REGION}
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # WebSocket Service
+  websocket-service:
+    build:
+      context: ./services/websocket-service
+      dockerfile: ../../dockerfiles/websocket-service.Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - MICROSOFT_TRANSLATOR_SERVICE_URL=http://translator-service:3004
+      - VARIABLE_SEPARATOR_URL=http://variable-separator:3003
     depends_on:
       - redis
+      - translator-service
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Variable Separator Service (placeholder - you may need to create this)
+  variable-separator:
+    build:
+      context: ./services/variable-separator
+      dockerfile: ../../dockerfiles/variable-separator.Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003
+    networks:
+      - app-network
+    restart: unless-stopped
+    profiles:
+      - full # Optional service, only starts with --profile full
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   redis-data:
