@@ -31,7 +31,7 @@ const CLIENT_TIMEOUT = 35000;
 
 const TRANSLATION_SERVICE_URL = process.env.TRANSLATION_SERVICE_URL || 'http://localhost:3002';
 const VARIABLE_SEPARATOR_URL = process.env.VARIABLE_SEPARATOR_URL || 'http://localhost:3003';
-const DEEPL_SERVICE_URL = process.env.DEEPL_SERVICE_URL || 'http://localhost:3004';
+const MICROSOFT_TRANSLATOR_SERVICE_URL = process.env.MICROSOFT_TRANSLATOR_SERVICE_URL || 'http://localhost:3004';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 const redis = new Redis(REDIS_URL);
@@ -39,7 +39,7 @@ const subscriber = new Redis(REDIS_URL);
 const publisher = new Redis(REDIS_URL);
 
 const separatorQueue = new Queue('separator', REDIS_URL);
-const deeplQueue = new Queue('deepl', REDIS_URL);
+const translatorQueue = new Queue('translator', REDIS_URL);
 const restoreQueue = new Queue('restore', REDIS_URL);
 
 const clientMap = new Map<string, WebSocket>();
@@ -138,7 +138,7 @@ separatorQueue.process(async (job) => {
   }
 });
 
-deeplQueue.process(async (job) => {
+translatorQueue.process(async (job) => {
   try {
     publisher.publish('translation-status', JSON.stringify({
       type: 'status',
@@ -147,7 +147,7 @@ deeplQueue.process(async (job) => {
     }));
 
     const response = await axios.post(
-      `${DEEPL_SERVICE_URL}/translate`,
+      `${MICROSOFT_TRANSLATOR_SERVICE_URL}/translate`,
       {
         text: job.data.text,
         targetLanguage: job.data.targetLanguage
@@ -214,15 +214,15 @@ const handleTranslation = async (ws: WebSocket, message: TranslationRequest) => 
       return;
     }
 
-    const deeplJob = await deeplQueue.add({
+    const translatorJob = await translatorQueue.add({
       text: separatorResult.processedText,
       targetLanguage: message.targetLanguage,
       rowId: message.rowId
     });
-    const deeplResult = await deeplJob.finished();
+    const translatorResult = await translatorJob.finished();
 
     const restoreJob = await restoreQueue.add({
-      text: deeplResult.translatedText,
+      text: translatorResult.translatedText,
       variables: separatorResult.variables,
       rowId: message.rowId
     });
@@ -283,12 +283,12 @@ wss.on('close', () => {
   redis.quit();
 });
 
-[separatorQueue, deeplQueue, restoreQueue].forEach(queue => {
-  queue.on('error', (error) => {
+[separatorQueue, translatorQueue, restoreQueue].forEach(queue => {
+  queue.on('error', (error: any) => {
     console.error(`Queue error in ${queue.name}:`, error);
   });
 
-  queue.on('failed', (job, error) => {
+  queue.on('failed', (job: any, error: any) => {
     console.error(`Job failed in ${queue.name}:`, error);
     publisher.publish('translation-status', JSON.stringify({
       type: 'status',

@@ -32,6 +32,8 @@ cd hoi4-translate-app
 ```env
 DEEPL_API_KEY=your-deepl-api-key
 OPENAI_API_KEY=your-openai-api-key  # Optional
+DATABASE_URL=postgresql://user:password@localhost:5432/translator
+JWT_SECRET=your-secret
 ```
 
 3. Start the services:

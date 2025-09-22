@@ -7,43 +7,44 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-const DEEPL_API_KEY = process.env.DEEPL_API_KEY;
-const DEEPL_API_URL = 'https://api-free.deepl.com/v2/translate';
+const MICROSOFT_TRANSLATOR_KEY = process.env.MICROSOFT_TRANSLATOR_KEY;
+const MICROSOFT_TRANSLATOR_REGION = process.env.MICROSOFT_TRANSLATOR_REGION;
+const MICROSOFT_TRANSLATOR_URL = 'https://api.cognitive.microsofttranslator.com/translate';
 
 const LANGUAGE_CODE_MAP: Record<string, string> = {
-  'l_english': 'EN-GB',
-  'l_french': 'FR',
-  'l_german': 'DE',
-  'l_spanish': 'ES',
-  'l_polish': 'PL',
-  'l_russian': 'RU',
-  'l_turkish': 'TR',
-  'l_portuguese': 'PT-PT',
-  'l_brazilian': 'PT-BR',
-  'l_chinese': 'ZH',
-  'l_japanese': 'JA',
-  'l_korean': 'KO',
-  'l_italian': 'IT',
-  'l_dutch': 'NL',
-  'l_finnish': 'FI',
-  'l_swedish': 'SV',
-  'l_czech': 'CS',
-  'l_hungarian': 'HU',
-  'l_romanian': 'RO',
-  'l_danish': 'DA',
-  'l_norwegian': 'NB',
-  'l_ukrainian': 'UK',
-  'l_greek': 'EL',
-  'l_bulgarian': 'BG',
-  'l_estonian': 'ET',
-  'l_latvian': 'LV',
-  'l_lithuanian': 'LT',
-  'l_slovak': 'SK',
-  'l_slovenian': 'SL',
-  'l_indonesian': 'ID',
-  'l_arabic': 'AR',
-  'l_simplified_chinese': 'ZH-HANS',
-  'l_traditional_chinese': 'ZH-HANT'
+  'l_english': 'en',
+  'l_french': 'fr',
+  'l_german': 'de',
+  'l_spanish': 'es',
+  'l_polish': 'pl',
+  'l_russian': 'ru',
+  'l_turkish': 'tr',
+  'l_portuguese': 'pt',
+  'l_brazilian': 'pt-br',
+  'l_chinese': 'zh-Hans',
+  'l_japanese': 'ja',
+  'l_korean': 'ko',
+  'l_italian': 'it',
+  'l_dutch': 'nl',
+  'l_finnish': 'fi',
+  'l_swedish': 'sv',
+  'l_czech': 'cs',
+  'l_hungarian': 'hu',
+  'l_romanian': 'ro',
+  'l_danish': 'da',
+  'l_norwegian': 'nb',
+  'l_ukrainian': 'uk',
+  'l_greek': 'el',
+  'l_bulgarian': 'bg',
+  'l_estonian': 'et',
+  'l_latvian': 'lv',
+  'l_lithuanian': 'lt',
+  'l_slovak': 'sk',
+  'l_slovenian': 'sl',
+  'l_indonesian': 'id',
+  'l_arabic': 'ar',
+  'l_simplified_chinese': 'zh-Hans',
+  'l_traditional_chinese': 'zh-Hant'
 };
 
 interface TranslationRequest {
@@ -60,12 +61,17 @@ interface ErrorResponse {
 }
 
 function convertLanguageCode(paradoxCode: string): string {
-  const deeplCode = LANGUAGE_CODE_MAP[paradoxCode.toLowerCase()];
-  if (!deeplCode) {
+  const microsoftCode = LANGUAGE_CODE_MAP[paradoxCode.toLowerCase()];
+  if (!microsoftCode) {
     throw new Error(`Unsupported language code: ${paradoxCode}`);
   }
-  return deeplCode;
+  return microsoftCode;
 }
+
+// Health check endpoint
+app.get('/health', (req: Request, res: Response) => {
+  res.status(200).json({ status: 'healthy', service: 'microsoft-translator' });
+});
 
 app.post('/translate', async (req: Request<{}, {}, TranslationRequest>, res: Response<TranslationResponse | ErrorResponse>) => {
   try {
@@ -75,46 +81,55 @@ app.post('/translate', async (req: Request<{}, {}, TranslationRequest>, res: Res
       return res.status(400).json({ error: 'Text and target language are required' });
     }
 
-    if (!DEEPL_API_KEY) {
-      return res.status(500).json({ error: 'DeepL API key not configured' });
+    if (!MICROSOFT_TRANSLATOR_KEY) {
+      return res.status(500).json({ error: 'Microsoft Translator API key not configured' });
     }
 
-    let deeplTargetLang;
+    let microsoftTargetLang;
     try {
-      deeplTargetLang = convertLanguageCode(targetLanguage);
+      microsoftTargetLang = convertLanguageCode(targetLanguage);
     } catch (error) {
       return res.status(400).json({ error: (error as Error).message });
     }
 
     console.log('Translating:', text);
-    console.log('Target language:', targetLanguage, '→', deeplTargetLang);
+    console.log('Target language:', targetLanguage, '→', microsoftTargetLang);
 
     const response = await axios.post(
-      DEEPL_API_URL,
-      {
-        text: [text],
-        target_lang: deeplTargetLang,
-        preserve_formatting: true
-      },
+      `${MICROSOFT_TRANSLATOR_URL}?api-version=3.0&to=${microsoftTargetLang}`,
+      [{
+        Text: text
+      }],
       {
         headers: {
-          'Authorization': `DeepL-Auth-Key ${DEEPL_API_KEY}`,
-          'Content-Type': 'application/json'
+          'Ocp-Apim-Subscription-Key': MICROSOFT_TRANSLATOR_KEY,
+          'Ocp-Apim-Subscription-Region': MICROSOFT_TRANSLATOR_REGION,
+          'Content-Type': 'application/json',
+          'X-ClientTraceId': generateTraceId()
         }
       }
     );
 
-    const translatedText = response.data.translations[0].text;
+    const translatedText = response.data[0].translations[0].text;
     console.log('Translation result:', translatedText);
 
     res.json({ translatedText });
   } catch (error) {
     console.error('Translation error:', error);
+    if (axios.isAxiosError(error)) {
+      console.error('Response data:', error.response?.data);
+      console.error('Response status:', error.response?.status);
+    }
     res.status(500).json({ error: 'Translation failed' });
   }
 });
 
+// Generate a unique trace ID for Microsoft Translator requests
+function generateTraceId(): string {
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
 const port = process.env.PORT || 3004;
 app.listen(port, () => {
-  console.log(`DeepL translation service listening on port ${port}`);
+  console.log(`Microsoft Translator service listening on port ${port}`);
 });

@@ -1,7 +1,7 @@
 {
-  "name": "deepl-service",
+  "name": "microsoft-translator-service",
   "version": "1.0.0",
-  "description": "DeepL translation service for Paradox Translator",
+  "description": "Microsoft Translator service for Paradox Translator",
   "main": "dist/index.js",
   "scripts": {
     "start": "node dist/index.js",
