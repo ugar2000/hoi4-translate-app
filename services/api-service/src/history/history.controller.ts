@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { Express } from 'express';
 import { HistoryService } from './history.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';

@@ -35,7 +35,7 @@ export class TranslateGateway
   private readonly logger = new Logger(TranslateGateway.name);
 
   @WebSocketServer()
-  private readonly server: Server;
+  private readonly server!: Server;
 
   constructor(private readonly translateService: TranslateService) {}
 

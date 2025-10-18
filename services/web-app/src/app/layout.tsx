@@ -17,11 +17,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <Background>
+    <html lang="en" className="h-full">
+      <body className={`${inter.className} h-full w-full m-0 p-0`}>
+        <Background className="w-full h-full">
           <AuthHeader />
-          {children}
+          <div className="w-full">
+            {children}
+          </div>
         </Background>
       </body>
     </html>

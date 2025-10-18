@@ -43,8 +43,8 @@ services:
 
   api-service:
     build:
-      context: ./services/api-service
-      dockerfile: ../../dockerfiles/api-service.Dockerfile
+      context: .
+      dockerfile: dockerfiles/api-service.Dockerfile
     env_file:
       - ./services/api-service/.env
     depends_on:
@@ -72,22 +72,18 @@ services:
   # Main Next.js Application
   web-app:
     build:
-      context: .
-      dockerfile: dockerfiles/web-app.Dockerfile
+      context: ./services/web-app
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
     env_file:
-      - ./.env
+      - ./services/web-app/.env
     depends_on:
       - db
       - redis
       - api-service
     networks:
       - app-network
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/.next
 
   # Microsoft Translator Service
   translator-service:

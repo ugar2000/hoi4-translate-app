@@ -10,6 +10,12 @@
 /services/*/node_modules
 /services/translation-service/node_modules
 /services/websocket-service/node_modules
+/services/api-service/node_modules
+/services/web-app/node_modules
+
+
+# builds
+/services/web-app/.next
 
 # testing
 /coverage

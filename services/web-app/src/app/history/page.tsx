@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import AppLayout from '@/components/AppLayout'
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3005/api').replace(/\/$/, '')
 
@@ -16,13 +17,21 @@ type HistoryEntry = {
   translatedFileName: string
 }
 
+// Helper function to get cookie value
+function getCookie(name: string): string | null {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop()?.split(';').shift() || null;
+  return null;
+}
+
 export default function HistoryPage() {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
+    const token = getCookie('auth-token')
     if (!token) {
       setError('You must be logged in to view your translation history.')
       setLoading(false)
@@ -35,6 +44,7 @@ export default function HistoryPage() {
           headers: {
             Authorization: `Bearer ${token}`,
           },
+          credentials: 'include'
         })
 
         if (!response.ok) {
@@ -55,7 +65,7 @@ export default function HistoryPage() {
   }, [])
 
   const handleDownload = async (id: number, type: 'original' | 'translated', fileName: string) => {
-    const token = localStorage.getItem('token')
+    const token = getCookie('auth-token')
     if (!token) {
       setError('You must be logged in to download files.')
       return
@@ -66,6 +76,7 @@ export default function HistoryPage() {
         headers: {
           Authorization: `Bearer ${token}`,
         },
+        credentials: 'include'
       })
 
       if (!response.ok) {
@@ -145,9 +156,10 @@ export default function HistoryPage() {
   }
 
   return (
-    <main className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-4">Translation History</h1>
-      {renderContent()}
-    </main>
+    <AppLayout>
+      <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-200">
+        {renderContent()}
+      </div>
+    </AppLayout>
   )
 }
