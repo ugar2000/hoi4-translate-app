@@ -1,4 +1,4 @@
-import {CaretPosition, CaretPositionOptions, LANGUAGE_CODES} from "@/types";
+import {CaretPosition, CaretPositionOptions, LANGUAGE_CODES} from "@/types/legacy.types";
 
 export function isLanguageCode(value: string): value is LANGUAGE_CODES {
     return Object.values(LANGUAGE_CODES).includes(value as LANGUAGE_CODES);

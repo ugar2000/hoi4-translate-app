@@ -6,6 +6,10 @@ import { jwtVerify } from 'jose'
 const protectedRoutes = ['/translator', '/history', '/settings']
 
 export async function middleware(request: NextRequest) {
+  // TEMPORARILY DISABLED FOR SCREENSHOTS - REMEMBER TO RE-ENABLE!
+  return NextResponse.next()
+  
+  /* ORIGINAL AUTH CODE - UNCOMMENT TO RE-ENABLE
   const { pathname } = request.nextUrl
 
   // Check if the current route is protected
@@ -43,6 +47,7 @@ export async function middleware(request: NextRequest) {
     loginUrl.searchParams.set('redirect', pathname)
     return NextResponse.redirect(loginUrl)
   }
+  */
 }
 
 export const config = {

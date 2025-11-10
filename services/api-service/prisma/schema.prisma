@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         Int         @id @default(autoincrement())
+  email      String      @unique
+  password   String
+  createdAt  DateTime    @default(now())
+  translates Translate[]
+}
+
+model Translate {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  originalFile   String
+  translatedFile String
+  originLang     String
+  translatedLang String
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("translates")
+}
+
+model PipelineFile {
+  fileId       String           @id @map("file_id")
+  status       String           @default("pending")
+  totalLines   Int              @default(0) @map("total_lines")
+  totalChunks  Int              @default(0) @map("total_chunks")
+  originLang   String?          @map("origin_lang")
+  targetLang   String?          @map("target_lang")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  completedAt  DateTime?        @map("completed_at")
+  error        String?
+  progress     PipelineProgress?
+
+  @@map("files")
+}
+
+model PipelineProgress {
+  fileId          String        @id @map("file_id")
+  processedLines  Int           @default(0) @map("processed_lines")
+  processedChunks Int           @default(0) @map("processed_chunks")
+  updatedAt       DateTime      @default(now()) @map("updated_at")
+  file            PipelineFile  @relation(fields: [fileId], references: [fileId], onDelete: Cascade)
+
+  @@map("progress")
+}

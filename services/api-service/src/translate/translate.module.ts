@@ -1,28 +1,35 @@
 import { Module } from '@nestjs/common';
-import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TranslateController } from './translate.controller';
 import { TranslateService } from './translate.service';
 import { TranslateGateway } from './translate.gateway';
+import { CoordinatorClient } from './coordinator.client';
+// import { createMinio } from '../../../../packages/miniox';
+
+// export const MINIO_TOKEN = 'MINIO_CLIENT';
 
 @Module({
-  imports: [
-    ClientsModule.registerAsync([
-      {
-        name: 'TRANSLATION_CLIENT',
-        imports: [ConfigModule],
-        inject: [ConfigService],
-        useFactory: async (config: ConfigService) => ({
-          transport: Transport.TCP,
-          options: {
-            host: config.get<string>('TRANSLATION_HOST', 'localhost'),
-            port: Number(config.get<string>('TRANSLATION_PORT', '4001')),
-          },
-        }),
-      },
-    ]),
-  ],
+  imports: [ConfigModule],
   controllers: [TranslateController],
-  providers: [TranslateService, TranslateGateway],
+  providers: [
+    TranslateService,
+    TranslateGateway,
+    {
+      provide: CoordinatorClient,
+      useFactory: (config: ConfigService) => {
+        const address = config.get<string>(
+          'COORDINATOR_ADDRESS',
+          'localhost:50051',
+        );
+        return new CoordinatorClient(address);
+      },
+      inject: [ConfigService],
+    },
+    // {
+    //   provide: MINIO_TOKEN,
+    //   useFactory: () => createMinio('api-service'),
+    // },
+  ],
+  exports: [CoordinatorClient /* , MINIO_TOKEN */],
 })
 export class TranslateModule {}

@@ -41,7 +41,7 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Token payload missing user');
       }
 
-      request.user = { id: payload.userId };
+      request.user = { userId: payload.userId };
       return true;
     } catch (error) {
       throw new UnauthorizedException('Invalid or expired token');

@@ -1,42 +1,36 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { useAuth } from '@/hooks/use-auth'
 
 export default function AuthHeader() {
-  const [loggedIn, setLoggedIn] = useState(false)
-  const router = useRouter()
+  const { isAuthenticated, user, logout, isLoggingOut } = useAuth()
 
-  useEffect(() => {
-    const updateState = () => setLoggedIn(!!localStorage.getItem('token'))
-    updateState()
-    const handler = () => updateState()
-    window.addEventListener('storage', handler)
-    window.addEventListener('auth-changed', handler as EventListener)
-    return () => {
-      window.removeEventListener('storage', handler)
-      window.removeEventListener('auth-changed', handler as EventListener)
+  const handleLogout = async () => {
+    try {
+      await logout()
+    } catch (error) {
+      console.error('Logout failed:', error)
     }
-  }, [])
-
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    setLoggedIn(false)
-    window.dispatchEvent(new Event('auth-changed'))
-    router.push('/login')
   }
 
   return (
     <div className="p-4 flex justify-between items-center gap-4">
       <div className="flex gap-4 text-sm">
         <Link href="/">Home</Link>
-        {loggedIn && <Link href="/history">History</Link>}
+        {isAuthenticated && <Link href="/history">History</Link>}
       </div>
       <div className="flex gap-2 items-center">
-        {loggedIn ? (
-          <Button onClick={handleLogout}>Logout</Button>
+        {isAuthenticated ? (
+          <div className="flex items-center gap-3">
+            {user?.email && (
+              <span className="text-sm text-gray-600">Welcome, {user.email}</span>
+            )}
+            <Button onClick={handleLogout} disabled={isLoggingOut}>
+              {isLoggingOut ? 'Logging out...' : 'Logout'}
+            </Button>
+          </div>
         ) : (
           <>
             <Link href="/login" className="text-sm underline">Login</Link>

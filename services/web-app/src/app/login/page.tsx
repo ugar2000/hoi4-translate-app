@@ -1,54 +1,39 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { PasswordInput } from '@/components/ui'
 import Link from 'next/link'
+import { useLogin } from '@/hooks/use-auth'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3005/api'
-
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState('')
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectUrl = searchParams.get('redirect') || '/translator'
 
+  const { mutateAsync: login, isPending: isLoading, error } = useLogin()
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
-    setError('')
 
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-        credentials: 'include' // Important for cookies
-      })
+      console.log('Login attempt with:', { email, password })
+      console.log('Redirect URL:', redirectUrl)
 
-      if (res.ok) {
-        const data = await res.json()
+      await login({ email, password })
+      console.log('Login successful, about to redirect')
 
-        // Set the token as an HTTP-only cookie
-        document.cookie = `auth-token=${data.token}; path=/; secure; samesite=strict`
-
-        // Dispatch auth change event
-        window.dispatchEvent(new Event('auth-changed'))
-
-        // Redirect to the intended page or translator
+      // Add a small delay to ensure auth state is updated
+      setTimeout(() => {
+        console.log('Redirecting to:', redirectUrl)
         router.push(redirectUrl)
-      } else {
-        const errorData = await res.json()
-        setError(errorData.message || 'Login failed')
-      }
+      }, 100)
+
     } catch (err) {
-      setError('Network error. Please try again.')
-    } finally {
-      setIsLoading(false)
+      console.error('Login failed:', err)
     }
   }
 
@@ -57,11 +42,11 @@ export default function LoginPage() {
       {/* Background Effects */}
       <div className="absolute inset-0 bg-[url('/api/placeholder/1920/1080')] bg-cover bg-center opacity-10"></div>
       <div className="absolute inset-0 bg-gradient-to-br from-blue-900/20 via-purple-900/30 to-slate-900/40"></div>
-      
+
       {/* Floating Elements */}
       <div className="absolute top-20 left-10 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl animate-pulse"></div>
       <div className="absolute bottom-20 right-10 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
-      
+
       <div className="w-full max-w-md relative z-10">
         <form onSubmit={handleSubmit} className="bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl p-8 space-y-6 border border-white/20">
           <div className="text-center space-y-2">
@@ -80,7 +65,7 @@ export default function LoginPage() {
                 <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                 </svg>
-                {error}
+                {error.message}
               </div>
             </div>
           )}
@@ -130,7 +115,7 @@ export default function LoginPage() {
 
           <div className="text-center">
             <p className="text-sm text-gray-300">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link href="/register" className="text-blue-400 hover:text-blue-300 font-semibold hover:underline transition duration-200">
                 Create one now
               </Link>
@@ -139,5 +124,13 @@ export default function LoginPage() {
         </form>
       </div>
     </main>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <LoginForm />
+    </Suspense>
   )
 }

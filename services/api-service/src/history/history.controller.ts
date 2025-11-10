@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Post,
@@ -42,7 +44,7 @@ export class HistoryController {
     @UploadedFiles()
     files: { original?: Express.Multer.File[]; translated?: Express.Multer.File[] },
   ) {
-    const entry = await this.historyService.createHistoryEntry(user.id, dto, files);
+    const entry = await this.historyService.createHistoryEntry(user.userId, dto, files);
     return {
       id: entry.id,
       originLang: entry.originLang,
@@ -57,7 +59,7 @@ export class HistoryController {
 
   @Get()
   async listHistory(@CurrentUser() user: RequestUser) {
-    const entries = await this.historyService.getHistoryForUser(user.id);
+    const entries = await this.historyService.getHistoryForUser(user.userId);
     return entries.map((entry) => ({
       id: entry.id,
       originLang: entry.originLang,
@@ -70,13 +72,22 @@ export class HistoryController {
     }));
   }
 
+  @Delete(':id')
+  @HttpCode(204)
+  async deleteHistory(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    await this.historyService.deleteHistoryEntry(user.userId, id);
+  }
+
   @Get(':id/original')
   async downloadOriginal(
     @CurrentUser() user: RequestUser,
     @Param('id', ParseIntPipe) id: number,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const file = await this.historyService.getStoredFile(user.id, id, 'original');
+    const file = await this.historyService.getStoredFile(user.userId, id, 'original');
     res.setHeader(
       'Content-Type',
       file.contentType ?? 'application/octet-stream',
@@ -94,7 +105,7 @@ export class HistoryController {
     @Param('id', ParseIntPipe) id: number,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const file = await this.historyService.getStoredFile(user.id, id, 'translated');
+    const file = await this.historyService.getStoredFile(user.userId, id, 'translated');
     res.setHeader(
       'Content-Type',
       file.contentType ?? 'application/octet-stream',

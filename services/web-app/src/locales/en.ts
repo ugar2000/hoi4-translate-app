@@ -1,11 +1,11 @@
 export const en = {
     fileInput: {
-        selectFile: "Select YAML file",
-        clearFile: "Clear file",
-        selectedFile: "Selected file:",
+        selectFile: "Choose your localization file (.yml)",
+        clearFile: "Remove selected file",
+        selectedFile: "File ready for translation:",
     },
     languageSelect: {
-        placeholder: "Select source language",
+        placeholder: "Choose target language for translation",
         english: "English",
         russian: "Russian",
         german: "German",

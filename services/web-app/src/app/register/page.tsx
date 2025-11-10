@@ -5,53 +5,41 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { PasswordInput } from '@/components/ui'
 import Link from 'next/link'
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3005/api'
+import { useRegister, useRedirectIfAuthenticated } from '@/hooks/use-auth'
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [validationError, setValidationError] = useState('')
   const router = useRouter()
+  
+  const { mutateAsync: register, isPending: isLoading, error } = useRegister()
+  
+  // Redirect if already authenticated
+  useRedirectIfAuthenticated()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
-    setError('')
+    setValidationError('')
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match')
-      setIsLoading(false)
+      setValidationError('Passwords do not match')
       return
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters long')
-      setIsLoading(false)
+      setValidationError('Password must be at least 6 characters long')
       return
     }
 
     try {
-      const res = await fetch(`${API_URL}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-        credentials: 'include'
-      })
-
-      if (res.ok) {
-        // Redirect to login with success message
-        router.push('/login?message=Registration successful! Please sign in.')
-      } else {
-        const errorData = await res.json()
-        setError(errorData.message || 'Registration failed')
-      }
+      await register({ email, password })
+      // Redirect to translator after successful registration
+      router.push('/translator')
     } catch (err) {
-      setError('Network error. Please try again.')
-    } finally {
-      setIsLoading(false)
+      // Error is handled by the hook
+      console.error('Registration failed:', err)
     }
   }
 
@@ -77,13 +65,13 @@ export default function RegisterPage() {
             <p className="text-gray-300">Join the Paradox Game Translator community</p>
           </div>
 
-          {error && (
+          {(error || validationError) && (
             <div className="bg-red-50 border-l-4 border-red-500 text-red-700 px-4 py-3 rounded-r-lg">
               <div className="flex items-center">
                 <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                 </svg>
-                {error}
+                {validationError || error?.message}
               </div>
             </div>
           )}
