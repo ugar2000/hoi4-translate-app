@@ -16,6 +16,12 @@
 
 # builds
 /services/web-app/.next
+/services/translate-service/dist
+/services/websocket-service/dist
+/services/api-service/dist
+/services/postedit-service/dist
+/services/variable-service/dist
+/services/ingest-splitter/dist
 
 # testing
 /coverage
@@ -51,3 +57,4 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
