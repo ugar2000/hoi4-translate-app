@@ -34,7 +34,8 @@ exports/*
 !exports/.gitkeep
 
 .env
-!services/**/.env
+.env.*
+!.env.example
 
 # debug
 npm-debug.log*
