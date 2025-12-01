@@ -23,7 +23,7 @@ export class HistoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: FileStorageService,
-  ) {}
+  ) { }
 
   async createHistoryEntry(
     userId: number,
@@ -106,5 +106,22 @@ export class HistoryService {
 
   private sanitizeFileName(name: string): string {
     return name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  }
+
+  async deleteHistoryEntry(userId: number, id: number) {
+    const entry = await this.prisma.translate.findFirst({
+      where: { id, userId },
+    });
+
+    if (!entry) {
+      throw new NotFoundException('History entry not found');
+    }
+
+    await this.storage.deleteObject(entry.originalFile);
+    await this.storage.deleteObject(entry.translatedFile);
+
+    await this.prisma.translate.delete({
+      where: { id },
+    });
   }
 }

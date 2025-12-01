@@ -10,4 +10,4 @@ import { FileStorageService } from '../storage/file-storage.service';
   controllers: [HistoryController],
   providers: [HistoryService, PrismaService, FileStorageService],
 })
-export class HistoryModule {}
+export class HistoryModule { }

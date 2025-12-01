@@ -8,7 +8,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-  ) {}
+  ) { }
 
   async register(email: string, password: string) {
     const existing = await this.prisma.user.findUnique({ where: { email } });
@@ -16,8 +16,8 @@ export class AuthService {
       throw new BadRequestException('User already exists');
     }
 
-    if (password.length < 8) {
-      throw new BadRequestException('Password must be at least 8 characters');
+    if (password.length < 6) {
+      throw new BadRequestException('Password must be at least 6 characters');
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -26,7 +26,13 @@ export class AuthService {
     });
 
     const token = this.jwtService.sign({ userId: user.id });
-    return { token, userId: user.id };
+    return { 
+      token, 
+      user: { 
+        id: user.id, 
+        email: user.email 
+      } 
+    };
   }
 
   async login(email: string, password: string) {
@@ -41,6 +47,25 @@ export class AuthService {
     }
 
     const token = this.jwtService.sign({ userId: user.id });
-    return { token, userId: user.id };
+    return { 
+      token, 
+      user: { 
+        id: user.id, 
+        email: user.email 
+      } 
+    };
+  }
+
+  async getCurrentUser(userId: number) {
+    const user = await this.prisma.user.findUnique({ 
+      where: { id: userId },
+      select: { id: true, email: true }
+    });
+    
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    
+    return user;
   }
 }

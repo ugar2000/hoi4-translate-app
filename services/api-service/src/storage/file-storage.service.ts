@@ -1,12 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  S3Client,
-  PutObjectCommand,
-  HeadBucketCommand,
-  CreateBucketCommand,
-  GetObjectCommand,
-} from '@aws-sdk/client-s3';
+  createMinio,
+  ensureBucket,
+  MinioClient,
+} from '../../../../packages/miniox';
 import { Readable } from 'stream';
 
 interface GetObjectResult {
@@ -17,29 +15,25 @@ interface GetObjectResult {
 @Injectable()
 export class FileStorageService implements OnModuleInit {
   private readonly logger = new Logger(FileStorageService.name);
-  private readonly s3: S3Client;
   private readonly bucket: string;
+  private readonly client: MinioClient;
 
   constructor(private readonly configService: ConfigService) {
-    const endpoint = this.configService.get<string>('MINIO_ENDPOINT', 'http://minio:9000');
-    const accessKeyId = this.configService.get<string>('MINIO_ACCESS_KEY', 'minioadmin');
-    const secretAccessKey = this.configService.get<string>('MINIO_SECRET_KEY', 'minioadmin');
-    const region = this.configService.get<string>('MINIO_REGION', 'us-east-1');
-
     this.bucket = this.configService.get<string>('MINIO_BUCKET', 'translations');
-    this.s3 = new S3Client({
-      region,
-      endpoint,
-      forcePathStyle: true,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    });
+    this.client = createMinio('api-service');
   }
 
   async onModuleInit() {
-    await this.ensureBucket();
+    try {
+      await ensureBucket(this.client, this.bucket);
+      this.logger.log(`MinIO bucket ready: ${this.bucket}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to initialize bucket ${this.bucket}`,
+        error instanceof Error ? error.stack : `${error}`,
+      );
+      throw error;
+    }
   }
 
   async upload(
@@ -48,47 +42,75 @@ export class FileStorageService implements OnModuleInit {
     contentType: string,
     contentDisposition?: string,
   ): Promise<void> {
-    await this.s3.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: body,
-        ContentType: contentType,
-        ...(contentDisposition ? { ContentDisposition: contentDisposition } : {}),
-      }),
-    );
+    const metadata: Record<string, string> = {
+      'Content-Type': contentType,
+    };
+
+    if (contentDisposition) {
+      metadata['Content-Disposition'] = contentDisposition;
+    }
+
+    try {
+      await this.client.putObject(this.bucket, key, body, undefined, metadata);
+      this.logger.debug(`Uploaded object ${key} (${body.length} bytes)`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to upload object ${key}`,
+        error instanceof Error ? error.stack : `${error}`,
+      );
+      throw error;
+    }
   }
 
   async getObject(key: string): Promise<GetObjectResult> {
-    const response = await this.s3.send(
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-    );
+    try {
+      const stream = (await this.client.getObject(this.bucket, key)) as Readable;
+      let contentType: string | undefined;
 
-    const stream = response.Body as Readable | undefined;
-    if (!stream) {
-      throw new Error(`File ${key} did not return a readable stream`);
+      try {
+        const stat = await this.client.statObject(this.bucket, key);
+        const meta = stat.metaData ?? {};
+        contentType =
+          meta['content-type'] ??
+          meta['Content-Type'] ??
+          meta['content_type'] ??
+          undefined;
+      } catch (statError) {
+        this.logger.warn(
+          `Could not read metadata for ${key}: ${
+            statError instanceof Error ? statError.message : statError
+          }`,
+        );
+      }
+
+      return {
+        stream,
+        contentType,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to read object ${key}`,
+        error instanceof Error ? error.stack : `${error}`,
+      );
+      throw error;
     }
-
-    return {
-      stream,
-      contentType: response.ContentType ?? undefined,
-    };
   }
 
-  private async ensureBucket() {
+  async deleteObject(key: string): Promise<void> {
     try {
-      await this.s3.send(new HeadBucketCommand({ Bucket: this.bucket }));
-    } catch (error) {
-      this.logger.log(`Bucket ${this.bucket} not found, attempting to create`);
-      try {
-        await this.s3.send(new CreateBucketCommand({ Bucket: this.bucket }));
-      } catch (createError: any) {
-        const errorCode = createError?.Code ?? createError?.name;
-        if (errorCode !== 'BucketAlreadyOwnedByYou' && errorCode !== 'BucketAlreadyExists') {
-          this.logger.error(`Failed to create bucket ${this.bucket}: ${createError}`);
-          throw createError;
-        }
+      await this.client.removeObject(this.bucket, key);
+      this.logger.debug(`Deleted object ${key}`);
+    } catch (error: any) {
+      if (error?.code === 'NoSuchKey') {
+        this.logger.warn(`Object ${key} not found while deleting`);
+        return;
       }
+
+      this.logger.error(
+        `Failed to delete object ${key}`,
+        error instanceof Error ? error.stack : `${error}`,
+      );
+      throw error;
     }
   }
 }

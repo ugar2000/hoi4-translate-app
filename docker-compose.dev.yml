@@ -1,78 +1,211 @@
 # Development override for docker-compose
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+x-worker-env: &worker-env
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_SHARDS: ${REDIS_SHARDS:-64}
+  STREAM_READ_COUNT: ${STREAM_READ_COUNT:-32}
+  STREAM_BLOCK_MS: ${STREAM_BLOCK_MS:-1000}
+  MAX_ATTEMPTS: ${MAX_ATTEMPTS:-5}
+  WINDOW_PER_FILE: ${WINDOW_PER_FILE:-25}
+  MINIO_ENDPOINT: http://minio:9000
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+  MINIO_BUCKET: ${MINIO_BUCKET:-translator}
+  MINIO_REGION: ${MINIO_REGION:-us-east-1}
+  INPUT_PREFIX: ${INPUT_PREFIX:-inline}
+  OUTPUT_PREFIX: ${OUTPUT_PREFIX:-out}
+  EXPORT_PREFIX: ${EXPORT_PREFIX:-exports}
+  MINIO_SHARED_DIR: /exports
+  MINIO_QUEUE_NAME: ${MINIO_QUEUE_NAME:-minio:jobs}
+  MINIO_WORKERS: ${MINIO_WORKERS:-4}
+  POSTEDIT_BATCH_SIZE: ${POSTEDIT_BATCH_SIZE:-32}
+  POSTEDIT_FLUSH_MS: ${POSTEDIT_FLUSH_MS:-250}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-demo}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
 
 services:
-  # Development overrides for web app
-  web-app:
-    build:
-      target: deps  # Stop at deps stage for development
-    command: npm run dev
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/.next
-    environment:
-      - NODE_ENV=development
-    ports:
-      - "3000:3000"
-    env_file:
-      - ./.env
 
-  # Development overrides for translator service
-  translator-service:
-    command: npm run dev
-    volumes:
-      - ./services/deepl-service:/app
-      - /app/node_modules
-    env_file:
-      - ./services/deepl-service/.env
-
-  # Development overrides for websocket service  
-  websocket-service:
-    command: npm run dev
-    volumes:
-      - ./services/websocket-service:/app
-      - /app/node_modules
-    env_file:
-      - ./services/websocket-service/.env
-
-  # Development database with exposed ports
   db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-translator}
+    volumes:
+      - db-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
-    
-  # Development Redis with exposed ports
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - app-network
+
   redis:
+    image: redis:alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    restart: always
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
 
   minio:
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    image: minio/minio:RELEASE.2024-08-03T04-33-23Z
+    command: server /data --console-address ":9001"
     env_file:
       - ./services/minio/.env
+    environment:
+      MINIO_SERVER_URL: http://minio:9000
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  translate-service:
+    build:
+      context: .
+      dockerfile: services/translate-service/Dockerfile
+      args:
+        NODE_ENV: development
+    env_file:
+      - ./services/translate-service/.env
+    command: npm run start:dev
+    environment:
+      <<: *worker-env
+      NODE_ENV: development
+    depends_on:
+      - redis
+      - minio
+    volumes:
+      - ./services/translate-service:/app
+      - ./packages:/packages
+      - /app/node_modules
+    networks:
+      - app-network
+
+  postedit-service:
+    build:
+      context: .
+      dockerfile: services/postedit-service/Dockerfile
+      args:
+        NODE_ENV: development
+    command: npm run start:dev
+    environment:
+      <<: *worker-env
+      NODE_ENV: development
+    depends_on:
+      - redis
+      - minio
+    volumes:
+      - ./services/postedit-service:/app
+      - ./packages:/packages
+      - /app/node_modules
+    networks:
+      - app-network
+
+  variable-service:
+    build:
+      context: .
+      dockerfile: services/variable-service/Dockerfile
+      args:
+        NODE_ENV: development
+    command: npm run start:dev
+    environment:
+      <<: *worker-env
+      NODE_ENV: development
+    depends_on:
+      - redis
+      - minio
+    volumes:
+      - ./services/variable-service:/app
+      - ./packages:/packages
+      - /app/node_modules
+    networks:
+      - app-network
+
+  ingest-splitter:
+    build:
+      context: .
+      dockerfile: services/ingest-splitter/Dockerfile
+      args:
+        NODE_ENV: development
+    command: npm run start:dev
+    environment:
+      <<: *worker-env
+      NODE_ENV: development
+      SPLIT_MAX_LINES: ${SPLIT_MAX_LINES:-2000}
+      SPLIT_MAX_BYTES: ${SPLIT_MAX_BYTES:-5242880}
+      SPLIT_CONCURRENCY: ${SPLIT_CONCURRENCY:-2}
+    depends_on:
+      - redis
+      - minio
+      - db
+    volumes:
+      - ./services/ingest-splitter:/app
+      - ./packages:/packages
+      - ./exports:/exports
+      - /app/node_modules
+    networks:
+      - app-network
+
+  minio-service:
+    build:
+      context: .
+      dockerfile: services/minio-service/Dockerfile
+      args:
+        NODE_ENV: development
+    command: npm run start:dev
+    environment:
+      <<: *worker-env
+      NODE_ENV: development
+      EXPORT_PREFIX: ${EXPORT_PREFIX:-exports}
+    depends_on:
+      - redis
+      - minio
+    volumes:
+      - ./services/minio-service:/app
+      - ./packages:/packages
+      - ./exports:/exports
+      - /app/node_modules
+    networks:
+      - app-network
 
   api-service:
-    command: npm run start:dev
-    volumes:
-      - ./services/api-service:/app
-      - /app/node_modules
-    environment:
-      - NODE_ENV=development
-    ports:
-      - "3005:3005"
+    build:
+      context: .
+      dockerfile: dockerfiles/api-service.Dockerfile
     env_file:
       - ./services/api-service/.env
-
-  translation-service:
     command: npm run start:dev
-    volumes:
-      - ./services/translation-service:/app
-      - /app/node_modules
     environment:
-      - NODE_ENV=development
+      <<: *worker-env
+      NODE_ENV: development
+    depends_on:
+      - db
+      - redis
+      - minio
     ports:
-      - "4001:4001"
-    env_file:
-      - ./services/translation-service/.env
+      - "${API_SERVICE_PORT:-3005}:3005"
+    volumes:
+      - ./services/api-service:/app
+      - ./packages:/packages
+      - ./exports:/exports
+      - /app/node_modules
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  db-data:
+  redis-data:
+  minio-data:

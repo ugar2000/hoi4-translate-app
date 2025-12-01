@@ -4,13 +4,12 @@ A powerful translation tool designed specifically for Paradox Interactive games 
 
 ## 🌟 Features
 
-- **Smart Variable Handling**: Automatically preserves game-specific variables and formatting codes
-- **Hybrid Translation**: Uses Microsoft Translator for speed and accuracy, with optional OpenAI post-processing
-- **Real-time Progress**: Live updates on translation status via WebSocket
-- **YAML Support**: Handles Paradox's YAML localization files with proper comment handling
-- **Microservices Architecture**: Scalable design with Redis-based queue system
-- **Modern UI**: Built with Next.js and TypeScript for a smooth user experience
-- **Personal History**: Save original and translated files for each run with an in-app download archive
+- **Redis Streams Pipeline**: End-to-end ingestion → translate → post-edit → special characters → aggregate → upload, entirely powered by Redis Streams with consumer groups.
+- **Micro-batched Post-editing**: Batches up to 32 lines per request to OpenAI for efficient, consistent polishing of translations.
+- **Fairness & Idempotency**: Sharded processing with per-file semaphores, token buckets, deduplication keys, and DLQs keep throughput predictable and resilient.
+- **Streaming Control Plane**: A gRPC coordinator handles job lifecycle (start, status, cancel, retry) while data flows over Redis.
+- **Object Storage First**: All large payloads are stored in MinIO; Streams only carry metadata references, keeping messages lightweight.
+- **Real-time UI**: Next.js frontend with WebSocket updates for ongoing jobs and history downloads when aggregations finish.
 
 ## 🚀 Getting Started
 
@@ -36,11 +35,9 @@ cd hoi4-translate-app
      ```
    - Each backend service ships with a checked-in `.env` file (generated from its `.env.example`). Replace the placeholder secrets/API keys in the following files before running the stack:
      - `services/api-service/.env`
-    - `services/deepl-service/.env`
-     - `services/translation-service/.env`
      - `services/websocket-service/.env`
-     - `services/variable-separator/.env`
      - `services/minio/.env`
+   - The Redis Stream workers (coordinator, translate, postedit, special-chars, aggregate, uploader) read their configuration from Docker Compose environment variables. Update the values in `docker-compose.yml` or export the corresponding variables before `make up`.
 
 3. Build the containers:
 ```bash
@@ -70,36 +67,37 @@ yarn dev
 
 The app consists of several microservices:
 
-- **Frontend**: Next.js application with TypeScript and modern UI components
-- **API Service**: NestJS-based REST API handling authentication, translation requests, and the row-level WebSocket gateway
-- **Translation Service**: Optional OpenAI-powered post-processing
-- **Microsoft Translator Service**: Integrates with Azure AI Translator for fast translation
-- **Variable Separator**: Handles game-specific variables and formatting codes
-- **Redis**: Message queue and pub/sub for service communication
-- **MinIO Object Storage**: Stores original and translated files for user history downloads
+- **Frontend**: Next.js application with TypeScript and modern UI components.
+- **API Service**: NestJS REST API that delegates job control to the coordinator via gRPC and pushes row-level updates through Socket.IO.
+- **Coordinator Service**: gRPC control plane that ingests jobs, maintains Redis metadata, exposes status, and manages cancel/retry flows.
+- **Translate Worker**: Consumes `lines:in:{shard}`, reads line payloads from MinIO, and produces the first-pass translation artefacts.
+- **Postedit Service**: Micro-batches lines (≤32) for OpenAI, writes the postedited output, and forwards metadata to the next stage.
+- **Special Characters Service**: Normalises typographic characters while honouring Paradox formatting codes and placeholders.
+- **Aggregate Service**: Tracks per-file progress, marks completion in Redis, assembles the final file, and emits `file:ready` notifications.
+- **Uploader Service**: Copies aggregated files to the export prefix and marks jobs as `completed`.
+- **Redis**: Durable Streams backbone (AOF enabled) with per-stage consumer groups and DLQs.
+- **MinIO Object Storage**: Holds originals, per-stage artefacts, and final deliverables for history downloads.
 
 ## 🔧 Services
 
-### Variable Separator Service
-- Extracts and hashes game-specific variables
-- Preserves special formatting codes (§Y, §G, etc.)
-- Restores variables after translation
+### Coordinator Service
+- gRPC API: `StartJob`, `GetStatus`, `CancelJob`, `RetryFailed`.
+- Splits input payloads, writes to MinIO, and publishes metadata to `lines:in:{shard}`.
+- Aggregates metrics by shard (stream lengths, XPENDING, DLQ sizes).
 
-### Microsoft Translator Service
-- Fast and accurate baseline translations
-- Supports dozens of language pairs provided by Azure AI Translator
-- Preserves formatting
+### Translate / Postedit / Special-chars Workers
+- Share a reusable Redis worker harness (Streams, semaphores, rate limits, deduplication).
+- Use MinIO references stored inside Stream messages; payloads never touch Redis.
+- Postedit stage batches up to 32 lines and calls OpenAI once per flush.
+
+### Aggregate & Uploader Workers
+- Aggregate maintains per-file bitmaps and emits final files when every line is completed.
+- Uploader copies the assembled file to the export location and marks jobs complete for the UI/history views.
 
 ### API Service (NestJS)
-- Centralized authentication (login/register)
-- Delegates OpenAI requests to the translation microservice via Nest microservices
-- Provides REST endpoints consumed by the Next.js frontend
-- Hosts the Socket.IO gateway that streams per-row translation status updates to the UI
-
-### MinIO Object Storage
-- Stores every uploaded source file and its generated translation output
-- Powers the translation history page with persistent download links
-- Automatically initialised by the API service if the configured bucket is missing
+- Centralized authentication and Prisma-backed REST APIs.
+- Creates translation jobs via gRPC, waits for completion, and streams updates over WebSockets.
+- Surfaces history downloads using the MinIO export prefix populated by the uploader service.
 
 ## 🔐 Environment Variables
 
@@ -110,10 +108,12 @@ The project uses a combination of root-level and service-specific environment fi
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT` | `.env` | Credentials for the Postgres container |
 | `DATABASE_URL` | `.env`, `services/api-service/.env` | Prisma connection string used by the API and web app |
 | `JWT_SECRET`, `NEXTAUTH_SECRET` | `.env`, `services/api-service/.env` | Secrets for issuing/verifying auth tokens |
-| `OPENAI_API_KEY`, `OPENAI_MODEL` | `.env`, `services/translation-service/.env` | Configuration for the OpenAI translation microservice |
-| `MICROSOFT_TRANSLATOR_KEY`, `MICROSOFT_TRANSLATOR_REGION` | `.env`, `services/deepl-service/.env` | Credentials for the Microsoft Translator integration |
-| `REDIS_URL` | `.env`, `services/websocket-service/.env`, `services/variable-separator/.env` | Location of the Redis instance used by background queues |
-| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET` | `.env`, `services/api-service/.env`, `services/minio/.env` | Object storage configuration for saving translation files |
+| `COORDINATOR_ADDRESS` | `services/api-service/.env`, `docker-compose.yml` | Host/port for the gRPC coordinator used by the API |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | `.env`, `docker-compose.yml` | Credentials/models consumed by the translate and postedit workers |
+| `REDIS_HOST`, `REDIS_SHARDS`, `STREAM_READ_COUNT`, `STREAM_BLOCK_MS`, `MAX_ATTEMPTS`, `WINDOW_PER_FILE` | `docker-compose.yml` | Global Redis Streams configuration shared by every worker |
+| `POSTEDIT_BATCH_SIZE`, `POSTEDIT_FLUSH_MS` | `docker-compose.yml` | Micro-batching settings for the postedit worker |
+| `OUTPUT_PREFIX`, `EXPORT_PREFIX` | `docker-compose.yml`, `services/api-service/.env` | Final artefact destinations in MinIO |
+| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET` | `.env`, `services/api-service/.env`, `services/minio/.env`, `docker-compose.yml` | Object storage configuration for saving translation files |
 | `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_API_WS_URL` | `.env` | URLs consumed by the Next.js frontend |
 
 > **Tip:** To iterate quickly with hot reloading, use `make dev` to start the Docker Compose stack with the development overrides from `docker-compose.dev.yml`.
@@ -135,6 +135,17 @@ Supports all languages available through Microsoft Translator, including but not
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+## 🧪 Testing
+
+- Unit tests for shared stream utilities live alongside the translate worker:
+
+  ```bash
+  cd services/translate-worker
+  npm run test
+  ```
+
+- Integration smoke tests can be run by bringing the stack up with Docker Compose and submitting a job via the API (`POST /translate`). The gRPC coordinator exposes `StartJob`, `GetStatus`, and `RetryFailed` for automated end-to-end scenarios.
 
 ## 📝 License
 
